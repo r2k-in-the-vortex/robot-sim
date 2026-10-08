@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "units": {
+    "angles": "degrees",
+    "lengths": "model_units"
+  },
+  "joints": [
+    {
+      "theta_deg": 0.0,
+      "d": 0.3,
+      "a": 0.0,
+      "alpha_deg": 90.0
+    },
+    {
+      "theta_deg": 0.0,
+      "d": 0.0,
+      "a": 0.4,
+      "alpha_deg": 0.0
+    },
+    {
+      "theta_deg": 0.0,
+      "d": 0.0,
+      "a": 0.35,
+      "alpha_deg": 0.0
+    },
+    {
+      "theta_deg": 0.0,
+      "d": 0.3,
+      "a": 0.0,
+      "alpha_deg": 90.0
+    },
+    {
+      "theta_deg": 0.0,
+      "d": 0.0,
+      "a": 0.0,
+      "alpha_deg": -90.0
+    },
+    {
+      "theta_deg": 0.0,
+      "d": 0.12,
+      "a": 0.0,
+      "alpha_deg": 0.0
+    }
+  ]
+}
