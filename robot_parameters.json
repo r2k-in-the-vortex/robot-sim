@@ -4,6 +4,15 @@
     "angles": "degrees",
     "lengths": "model_units"
   },
+  "meshes": [
+    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
+    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
+    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
+    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
+    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
+    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
+    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 }
+  ],
   "joints": [
     {
       "theta_deg": 0.0,
