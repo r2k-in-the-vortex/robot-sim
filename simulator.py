@@ -13,6 +13,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.colors import LightSource, to_rgba
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from stl import mesh as stl_mesh
@@ -35,6 +36,7 @@ MESH_COLORS = ("#536d7a", "#d94a45", "#31845b", "#3978c5", "#d18b2c", "#7655a5",
 class MeshSetting:
 	path: str
 	offset: tuple[float, float, float]
+	rotation: tuple[float, float, float]
 	opacity: float
 
 
@@ -42,6 +44,7 @@ class MeshSetting:
 class MeshEntryWidgets:
 	path: ttk.Entry
 	offset: tuple[ttk.Entry, ttk.Entry, ttk.Entry]
+	rotation: tuple[ttk.Entry, ttk.Entry, ttk.Entry]
 	opacity: ttk.Spinbox
 
 
@@ -85,12 +88,14 @@ class RobotArmSimulator:
 		self.parameters = self._read_entry_parameters()
 		self.mesh_settings = self._read_mesh_entries()
 		self._render_scene()
-
 		self.axes.mouse_init(rotate_btn=[], pan_btn=[], zoom_btn=[])
 		self.canvas.mpl_connect("button_press_event", self._on_mouse_press)
 		self.canvas.mpl_connect("button_release_event", self._on_mouse_release)
 		self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
-		self.canvas.mpl_connect("scroll_event", self._on_scroll)
+		canvas_widget = self.canvas.get_tk_widget()
+		canvas_widget.bind("<MouseWheel>", self._on_tk_mousewheel)
+		canvas_widget.bind("<Button-4>", self._on_tk_mousewheel)
+		canvas_widget.bind("<Button-5>", self._on_tk_mousewheel)
 
 	def _build_parameter_tab(self) -> None:
 		self.parameter_notebook = ttk.Notebook(self.parameters_tab)
@@ -150,13 +155,16 @@ class RobotArmSimulator:
 		).grid(row=0, column=0, columnspan=7, sticky=tk.W, pady=(0, 6))
 		ttk.Label(
 			self.mesh_tab,
-			text="Offsets are local to each frame and use the same length units as d and a.",
-		).grid(row=1, column=0, columnspan=7, sticky=tk.W, pady=(0, 14))
+			text="Offsets use model length units. Rotations are local X, then Y, then Z, in degrees.",
+		).grid(row=1, column=0, columnspan=10, sticky=tk.W, pady=(0, 14))
 
-		headings = ("Frame", "STL file", "", "Offset X", "Offset Y", "Offset Z", "Opacity")
+		headings = (
+			"Frame", "STL file", "", "Offset X", "Offset Y", "Offset Z",
+			"Rot X", "Rot Y", "Rot Z", "Opacity",
+		)
 		for column, heading in enumerate(headings):
 			ttk.Label(self.mesh_tab, text=heading, font=("Segoe UI", 9, "bold")).grid(
-				row=2, column=column, sticky=tk.W, padx=(0, 8), pady=(0, 6)
+				row=2, column=column, sticky=tk.W, padx=(0, 5), pady=(0, 6)
 			)
 
 		self.mesh_entries: list[MeshEntryWidgets] = []
@@ -164,7 +172,7 @@ class RobotArmSimulator:
 			ttk.Label(self.mesh_tab, text=frame_name).grid(
 				row=row_index, column=0, sticky=tk.W, padx=(0, 8), pady=4
 			)
-			path_entry = ttk.Entry(self.mesh_tab, width=34)
+			path_entry = ttk.Entry(self.mesh_tab, width=24)
 			path_entry.grid(row=row_index, column=1, sticky=tk.EW, padx=(0, 6), pady=4)
 			ttk.Button(
 				self.mesh_tab,
@@ -173,19 +181,25 @@ class RobotArmSimulator:
 			).grid(row=row_index, column=2, padx=(0, 8), pady=4)
 			offset_entries = []
 			for column in range(3, 6):
-				entry = ttk.Entry(self.mesh_tab, width=9)
+				entry = ttk.Entry(self.mesh_tab, width=7)
 				entry.insert(0, "0")
 				entry.grid(row=row_index, column=column, sticky=tk.W, padx=(0, 8), pady=4)
 				offset_entries.append(entry)
-			opacity_entry = ttk.Spinbox(self.mesh_tab, from_=0.0, to=1.0, increment=0.05, width=7)
+			rotation_entries = []
+			for column in range(6, 9):
+				entry = ttk.Entry(self.mesh_tab, width=7)
+				entry.insert(0, "0")
+				entry.grid(row=row_index, column=column, sticky=tk.W, padx=(0, 8), pady=4)
+				rotation_entries.append(entry)
+			opacity_entry = ttk.Spinbox(self.mesh_tab, from_=0.0, to=1.0, increment=0.05, width=6)
 			opacity_entry.insert(0, "1")
-			opacity_entry.grid(row=row_index, column=6, sticky=tk.W, pady=4)
+			opacity_entry.grid(row=row_index, column=9, sticky=tk.W, pady=4)
 			self.mesh_entries.append(
-				MeshEntryWidgets(path_entry, tuple(offset_entries), opacity_entry)
+				MeshEntryWidgets(path_entry, tuple(offset_entries), tuple(rotation_entries), opacity_entry)
 			)
 		self.mesh_tab.columnconfigure(1, weight=1)
 		self.mesh_status = ttk.Label(self.mesh_tab, text="No meshes configured.")
-		self.mesh_status.grid(row=11, column=0, columnspan=7, sticky=tk.W, pady=(10, 2))
+		self.mesh_status.grid(row=11, column=0, columnspan=10, sticky=tk.W, pady=(10, 2))
 		ttk.Button(self.mesh_tab, text="Apply Meshes", command=self._apply_from_entries).grid(
 			row=12, column=0, sticky=tk.W, padx=(0, 8), pady=(10, 0)
 		)
@@ -195,7 +209,7 @@ class RobotArmSimulator:
 
 	@staticmethod
 	def _default_mesh_settings() -> tuple[MeshSetting, ...]:
-		return tuple(MeshSetting("", (0.0, 0.0, 0.0), 1.0) for _ in MESH_FRAME_NAMES)
+		return tuple(MeshSetting("", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0) for _ in MESH_FRAME_NAMES)
 
 	def _browse_stl(self, entry: ttk.Entry) -> None:
 		selected_path = filedialog.askopenfilename(
@@ -235,15 +249,16 @@ class RobotArmSimulator:
 		settings = []
 		for widgets in self.mesh_entries:
 			offset = tuple(float(entry.get()) for entry in widgets.offset)
+			rotation = tuple(float(entry.get()) for entry in widgets.rotation)
 			opacity = float(widgets.opacity.get())
-			if not all(math.isfinite(value) for value in (*offset, opacity)):
-				raise ValueError("Mesh offsets and opacity must be finite numbers.")
+			if not all(math.isfinite(value) for value in (*offset, *rotation, opacity)):
+				raise ValueError("Mesh offsets, rotations, and opacity must be finite numbers.")
 			if not 0.0 <= opacity <= 1.0:
 				raise ValueError("Mesh opacity must be from 0 to 1.")
 			mesh_path = widgets.path.get().strip()
 			if mesh_path and Path(mesh_path).suffix.lower() != ".stl":
 				raise ValueError(f"Mesh path must point to an STL file: {mesh_path}")
-			settings.append(MeshSetting(mesh_path, offset, opacity))
+			settings.append(MeshSetting(mesh_path, offset, rotation, opacity))
 		return tuple(settings)
 
 	def _populate_dh_entries(self, values: tuple[tuple[float, float, float, float], ...]) -> None:
@@ -257,6 +272,9 @@ class RobotArmSimulator:
 			widgets.path.delete(0, tk.END)
 			widgets.path.insert(0, setting.path)
 			for entry, value in zip(widgets.offset, setting.offset):
+				entry.delete(0, tk.END)
+				entry.insert(0, self._format_value(value))
+			for entry, value in zip(widgets.rotation, setting.rotation):
 				entry.delete(0, tk.END)
 				entry.insert(0, self._format_value(value))
 			widgets.opacity.delete(0, tk.END)
@@ -309,7 +327,12 @@ class RobotArmSimulator:
 				path = mesh_path.relative_to(self.config_path.parent.resolve()).as_posix()
 			except ValueError:
 				path = str(mesh_path)
-		return {"path": path, "offset": list(setting.offset), "opacity": setting.opacity}
+		return {
+			"path": path,
+			"offset": list(setting.offset),
+			"rotation_deg": list(setting.rotation),
+			"opacity": setting.opacity,
+		}
 
 	def _read_json_configuration(
 		self,
@@ -353,9 +376,13 @@ class RobotArmSimulator:
 			if not isinstance(offset, list | tuple) or len(offset) != 3:
 				raise ValueError("Each mesh offset must contain exactly three values.")
 			offset_values = tuple(float(value) for value in offset)
+			rotation = mesh_setting.get("rotation_deg", (0.0, 0.0, 0.0))
+			if not isinstance(rotation, list | tuple) or len(rotation) != 3:
+				raise ValueError("Each mesh rotation must contain exactly three values.")
+			rotation_values = tuple(float(value) for value in rotation)
 			opacity = float(mesh_setting.get("opacity", 1.0))
-			if not all(math.isfinite(value) for value in (*offset_values, opacity)):
-				raise ValueError("Mesh offsets and opacity must be finite numbers.")
+			if not all(math.isfinite(value) for value in (*offset_values, *rotation_values, opacity)):
+				raise ValueError("Mesh offsets, rotations, and opacity must be finite numbers.")
 			if not 0.0 <= opacity <= 1.0:
 				raise ValueError("Mesh opacity must be from 0 to 1.")
 			if path:
@@ -363,7 +390,7 @@ class RobotArmSimulator:
 				if not mesh_path.is_absolute():
 					mesh_path = self.config_path.parent / mesh_path
 				path = str(mesh_path.resolve())
-			mesh_settings.append(MeshSetting(path, offset_values, opacity))
+			mesh_settings.append(MeshSetting(path, offset_values, rotation_values, opacity))
 		return dh_values, tuple(mesh_settings)
 
 	def _read_json_parameters(self) -> tuple[tuple[float, float, float, float], ...]:
@@ -382,7 +409,6 @@ class RobotArmSimulator:
 		self._render_scene()
 
 	def _render_scene(self) -> None:
-		elevation, azimuth = self.axes.elev, self.axes.azim
 		transforms = forward_kinematics(self.parameters)
 		frame_origins = ((0.0, 0.0, 0.0),) + tuple(frame_origin(transform) for transform in transforms)
 		frame_transforms = (None,) + transforms
@@ -390,10 +416,8 @@ class RobotArmSimulator:
 		self.axes.set_facecolor("#f4f6f7")
 		self.axes.set_axis_off()
 		self.axes.set_box_aspect((1, 1, 1))
-		self.axes.view_init(elev=elevation, azim=azimuth)
-
-		mesh_vertices = []
 		mesh_errors = []
+		mesh_vertices = []
 		for frame_index, (setting, origin, transform) in enumerate(
 			zip(self.mesh_settings, frame_origins, frame_transforms)
 		):
@@ -402,23 +426,26 @@ class RobotArmSimulator:
 			try:
 				triangles = stl_mesh.Mesh.from_file(setting.path).vectors.astype(float)
 				if triangles.size == 0:
+					mesh_errors.append(f"{MESH_FRAME_NAMES[frame_index]}: STL contains no vertices")
 					continue
-				rotation = np.eye(3) if transform is None else np.asarray(
+				local_rotation = np.asarray(self._rotation_matrix(setting.rotation))
+				frame_rotation = np.eye(3) if transform is None else np.asarray(
 					[[transform[row][column] for column in range(3)] for row in range(3)]
 				)
-				mesh_origin = np.asarray(origin) + rotation @ np.asarray(setting.offset)
-				placed_triangles = triangles @ rotation.T + mesh_origin
+				rotated_local = triangles @ local_rotation.T + np.asarray(setting.offset)
+				placed_triangles = rotated_local @ frame_rotation.T + np.asarray(origin)
 				mesh_vertices.append(placed_triangles.reshape(-1, 3))
+				face_colors = self._lit_face_colors(
+					placed_triangles, MESH_COLORS[frame_index], setting.opacity
+				)
 				self.axes.add_collection3d(
 					Poly3DCollection(
 						placed_triangles,
-						facecolors=MESH_COLORS[frame_index],
-						edgecolors=MESH_COLORS[frame_index],
-						linewidths=0.15,
-						alpha=setting.opacity,
+						facecolors=face_colors,
+						edgecolors="none",
 					)
 				)
-			except Exception as error:
+			except (OSError, RuntimeError, ValueError) as error:
 				mesh_errors.append(f"{MESH_FRAME_NAMES[frame_index]}: {error}")
 
 		minimums = tuple(min(point[axis] for point in frame_origins) for axis in range(3))
@@ -433,7 +460,6 @@ class RobotArmSimulator:
 		self.axes.set_xlim(center[0] - half_span, center[0] + half_span)
 		self.axes.set_ylim(center[1] - half_span, center[1] + half_span)
 		self.axes.set_zlim(center[2] - half_span, center[2] + half_span)
-
 		self.axes.plot(
 			[point[0] for point in frame_origins],
 			[point[1] for point in frame_origins],
@@ -459,13 +485,11 @@ class RobotArmSimulator:
 					arrow_length_ratio=0.24,
 				)
 			self.axes.text(
-				origin[0],
-				origin[1],
-				origin[2] + marker_length * 0.2,
+				origin[0], origin[1], origin[2] + marker_length * 0.2,
 				"Base" if frame_index == 0 else f"J{frame_index}",
-				color="#26323b",
-				fontsize=8,
+				color="#26323b", fontsize=8,
 			)
+
 		if mesh_errors:
 			self.mesh_status.configure(text="Mesh load issue: " + "; ".join(mesh_errors))
 		else:
@@ -476,6 +500,34 @@ class RobotArmSimulator:
 		self.pose_label.configure(
 			text=f"Frame 6 origin: X {tool_position[0]:.3f}   Y {tool_position[1]:.3f}   Z {tool_position[2]:.3f}"
 		)
+
+	@staticmethod
+	def _rotation_matrix(rotation_deg: tuple[float, float, float]) -> tuple[tuple[float, float, float], ...]:
+		rx, ry, rz = (math.radians(value) for value in rotation_deg)
+		cx, sx = math.cos(rx), math.sin(rx)
+		cy, sy = math.cos(ry), math.sin(ry)
+		cz, sz = math.cos(rz), math.sin(rz)
+		return (
+			(cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx),
+			(sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx),
+			(-sy, cy * sx, cy * cx),
+		)
+
+	@staticmethod
+	def _lit_face_colors(triangles: np.ndarray, color: str, opacity: float) -> np.ndarray:
+		normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+		lengths = np.linalg.norm(normals, axis=1)
+		normals = np.divide(
+			normals,
+			lengths[:, None],
+			out=np.zeros_like(normals),
+			where=lengths[:, None] > 0,
+		)
+		illumination = LightSource(azdeg=315, altdeg=45).shade_normals(normals)
+		illumination = 0.22 + illumination * 0.78
+		base_color = np.asarray(to_rgba(color)[:3])
+		rgb = np.clip(base_color[None, :] * illumination[:, None], 0, 1)
+		return np.column_stack((rgb, np.full(len(triangles), opacity)))
 
 	def _on_mouse_press(self, event: MouseEvent) -> None:
 		if event.inaxes is self.axes and event.button in (1, 3):
@@ -491,12 +543,10 @@ class RobotArmSimulator:
 			return
 		if event.x is None or event.y is None:
 			return
-
 		previous_x, previous_y = self._last_mouse_position
 		delta_x = event.x - previous_x
 		delta_y = event.y - previous_y
 		self._last_mouse_position = (event.x, event.y)
-
 		if self._drag_button == 1:
 			self.axes.view_init(
 				elev=max(-85, min(85, self.axes.elev + delta_y * 0.5)),
@@ -511,7 +561,6 @@ class RobotArmSimulator:
 		spans = [upper - lower for lower, upper in bounds]
 		pixels = max(1, min(self.axes.bbox.width, self.axes.bbox.height))
 		units_per_pixel = max(spans) / pixels
-
 		azimuth = math.radians(self.axes.azim)
 		elevation = math.radians(self.axes.elev)
 		right = (-math.sin(azimuth), math.cos(azimuth), 0)
@@ -529,10 +578,21 @@ class RobotArmSimulator:
 		):
 			axis(limits[0] + offset, limits[1] + offset)
 
-	def _on_scroll(self, event: MouseEvent) -> None:
-		if event.inaxes is not self.axes:
-			return
-		factor = 0.88 if event.button == "up" else 1 / 0.88
+	def _on_tk_mousewheel(self, event: tk.Event) -> str:
+		delta = getattr(event, "delta", 0)
+		if delta:
+			steps = max(abs(delta) / 120, 1)
+			factor = 0.88**steps if delta > 0 else (1 / 0.88) ** steps
+		elif getattr(event, "num", None) == 4:
+			factor = 0.88
+		elif getattr(event, "num", None) == 5:
+			factor = 1 / 0.88
+		else:
+			return "break"
+		self._zoom(factor)
+		return "break"
+
+	def _zoom(self, factor: float) -> None:
 		for get_limits, set_limits in (
 			(self.axes.get_xlim3d, self.axes.set_xlim3d),
 			(self.axes.get_ylim3d, self.axes.set_ylim3d),
@@ -541,7 +601,7 @@ class RobotArmSimulator:
 			lower, upper = get_limits()
 			center = (lower + upper) / 2
 			half_span = (upper - lower) * factor / 2
-			if 0.025 <= half_span <= 50:
+			if 0.025 <= half_span <= 1e9:
 				set_limits(center - half_span, center + half_span)
 		self.figure.canvas.draw_idle()
 

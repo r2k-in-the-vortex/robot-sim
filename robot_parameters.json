@@ -4,15 +4,6 @@
     "angles": "degrees",
     "lengths": "model_units"
   },
-  "meshes": [
-    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
-    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
-    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
-    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
-    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
-    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 },
-    { "path": "", "offset": [0.0, 0.0, 0.0], "opacity": 1.0 }
-  ],
   "joints": [
     {
       "theta_deg": 0.0,
@@ -49,6 +40,106 @@
       "d": 0.12,
       "a": 0.0,
       "alpha_deg": 0.0
+    }
+  ],
+  "meshes": [
+    {
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_01-1.STL",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "opacity": 1.0
     }
   ]
 }
