@@ -17,8 +17,9 @@ from kinematics import (
 	frame_origin,
 	inverse_kinematics,
 	inverse_kinematics_position,
+	inverse_kinematics_position_preserving_roll_yaw,
 )
-from simulator import offset_pose_translation
+from simulator import _rotation_to_rpy_degrees, offset_pose_translation
 
 
 def configured_geometry() -> tuple[DHParameters, ...]:
@@ -187,8 +188,20 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 
 		target_pose = offset_pose_translation(current_pose, 1, 1.0)
 		self.assertFalse(inverse_kinematics(target_pose, self.geometry))
-		position_solution = inverse_kinematics_position(
-			(36.0, 1.0, 58.0), self.geometry, initial_angles=(0.0,) * 6
+		start_solution = inverse_kinematics_position(
+			(36.0, 0.0, 58.0), self.geometry, initial_angles=(0.0,) * 6
+		)
+		self.assertIsNotNone(start_solution)
+		assert start_solution is not None
+		start_pose = forward_kinematics(
+			parameters_at_angles(self.geometry, start_solution.angles)
+		)[-1]
+		start_rpy = tuple(math.radians(value) for value in _rotation_to_rpy_degrees(start_pose))
+		position_solution = inverse_kinematics_position_preserving_roll_yaw(
+			(36.0, 1.0, 58.0),
+			self.geometry,
+			initial_angles=start_solution.angles,
+			preserved_roll_yaw=(start_rpy[0], start_rpy[2]),
 		)
 		self.assertIsNotNone(position_solution)
 		assert position_solution is not None
@@ -197,6 +210,9 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		)[-1]
 		for actual, expected in zip(frame_origin(achieved_pose), (36.0, 1.0, 58.0)):
 			self.assertAlmostEqual(actual, expected, delta=1e-5)
+		achieved_rpy = _rotation_to_rpy_degrees(achieved_pose)
+		self.assertAlmostEqual(achieved_rpy[0], math.degrees(start_rpy[0]), delta=1e-4)
+		self.assertAlmostEqual(achieved_rpy[2], math.degrees(start_rpy[2]), delta=1e-4)
 
 	def test_tk_y_jog_applies_position_solution(self) -> None:
 		try:
@@ -217,13 +233,19 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			start_position = frame_origin(forward_kinematics(app.parameters)[-1])
 			for actual, expected in zip(start_position, (36.0, 0.0, 58.0)):
 				self.assertAlmostEqual(actual, expected, delta=1e-5)
+			start_pose = forward_kinematics(app.parameters)[-1]
+			start_rpy = _rotation_to_rpy_degrees(start_pose)
 			app.jog_step_entry.delete(0, tk.END)
 			app.jog_step_entry.insert(0, "1")
 			app._jog_cartesian(1, 1)
-			self.assertIn("Moved Y +1 (orientation adjusted)", app.jog_status_label.cget("text"))
-			achieved = frame_origin(forward_kinematics(app.parameters)[-1])
+			self.assertIn("Moved Y +1 (pitch adjusted)", app.jog_status_label.cget("text"))
+			end_pose = forward_kinematics(app.parameters)[-1]
+			achieved = frame_origin(end_pose)
 			for actual, expected in zip(achieved, (36.0, 1.0, 58.0)):
 				self.assertAlmostEqual(actual, expected, delta=1e-5)
+			end_rpy = _rotation_to_rpy_degrees(end_pose)
+			self.assertAlmostEqual(end_rpy[0], start_rpy[0], delta=1e-4)
+			self.assertAlmostEqual(end_rpy[2], start_rpy[2], delta=1e-4)
 		finally:
 			app.root.destroy()
 

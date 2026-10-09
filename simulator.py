@@ -24,7 +24,7 @@ from kinematics import (
 	forward_kinematics,
 	frame_origin,
 	inverse_kinematics,
-	inverse_kinematics_position,
+	inverse_kinematics_position_preserving_roll_yaw,
 )
 
 DEFAULT_DH_VALUES = (
@@ -188,13 +188,15 @@ class RobotArmSimulator:
 				),
 			).angles
 		else:
-			position_solution = inverse_kinematics_position(
+			current_roll, _, current_yaw = _rotation_to_rpy_degrees(current_pose)
+			position_solution = inverse_kinematics_position_preserving_roll_yaw(
 				tuple(target_pose[axis][3] for axis in range(3)),
 				geometry,
 				initial_angles=current_angles,
+				preserved_roll_yaw=(math.radians(current_roll), math.radians(current_yaw)),
 			)
 			if position_solution is None:
-				self.jog_status_label.configure(text="No reachable IK solution for that step.")
+				self.jog_status_label.configure(text="No IK solution preserving roll and yaw for that step.")
 				return
 			new_angles = position_solution.angles
 			orientation_adjusted = True
@@ -209,7 +211,7 @@ class RobotArmSimulator:
 		self._render_scene()
 		axis_name = "XYZ"[axis]
 		displacement = direction * step
-		orientation_note = " (orientation adjusted)" if orientation_adjusted else ""
+		orientation_note = " (pitch adjusted)" if orientation_adjusted else ""
 		self.jog_status_label.configure(text=f"Moved {axis_name} {displacement:+g}{orientation_note}")
 
 	def _build_parameter_tab(self) -> None:

@@ -167,6 +167,138 @@ def _solve_linear3(
 	return (augmented[0][3], augmented[1][3], augmented[2][3])
 
 
+def _solve_linear_system(matrix: Sequence[Sequence[float]], vector: Sequence[float]) -> tuple[float, ...]:
+	"""Solve a small dense system using pivoted Gaussian elimination."""
+	size = len(vector)
+	augmented = [list(matrix[row]) + [vector[row]] for row in range(size)]
+	for column in range(size):
+		pivot = max(range(column, size), key=lambda row: abs(augmented[row][column]))
+		if abs(augmented[pivot][column]) < 1e-15:
+			raise ArithmeticError("Singular damped Jacobian system")
+		augmented[column], augmented[pivot] = augmented[pivot], augmented[column]
+		pivot_value = augmented[column][column]
+		for index in range(column, size + 1):
+			augmented[column][index] /= pivot_value
+		for row in range(size):
+			if row == column:
+				continue
+			factor = augmented[row][column]
+			for index in range(column, size + 1):
+				augmented[row][index] -= factor * augmented[column][index]
+	return tuple(augmented[row][size] for row in range(size))
+
+
+def _roll_pitch_yaw(rotation: tuple[tuple[float, float, float], ...]) -> tuple[float, float, float]:
+	r00, r01 = rotation[0][0], rotation[0][1]
+	r10, r11 = rotation[1][0], rotation[1][1]
+	r20, r21, r22 = rotation[2][0], rotation[2][1], rotation[2][2]
+	pitch = math.atan2(-r20, math.hypot(r00, r10))
+	if math.hypot(r00, r10) > 1e-9:
+		return math.atan2(r21, r22), pitch, math.atan2(r10, r00)
+	return 0.0, pitch, math.atan2(-r01, r11)
+
+
+def inverse_kinematics_position_preserving_roll_yaw(
+	target_position: Vector3,
+	geometry: Sequence[DHParameters],
+	*,
+	initial_angles: Sequence[float],
+	preserved_roll_yaw: tuple[float, float],
+	tolerance: float = 1e-5,
+	max_iterations: int = 200,
+) -> PositionIKSolution | None:
+	"""Solve XYZ while preserving roll/yaw and allowing pitch to vary.
+
+	The orientation constraints are appropriate for Cartesian jogs on this
+	five-independent-axis mechanism: preserving all six pose coordinates can be
+	overconstrained, but allowing pitch to change while holding roll and yaw
+	avoids unintended heading/roll drift.
+	"""
+	_validate_supported_geometry(geometry, tolerance)
+	if len(target_position) != 3 or not all(math.isfinite(value) for value in target_position):
+		raise ValueError("target_position must contain three finite values")
+	if len(initial_angles) != 6 or not all(math.isfinite(value) for value in initial_angles):
+		raise ValueError("initial_angles must contain six finite values")
+	if len(preserved_roll_yaw) != 2 or not all(math.isfinite(value) for value in preserved_roll_yaw):
+		raise ValueError("preserved_roll_yaw must contain finite roll and yaw angles")
+	if not math.isfinite(tolerance) or tolerance <= 0 or max_iterations <= 0:
+		raise ValueError("tolerance and max_iterations must be positive")
+
+	angles = list(initial_angles)
+	orientation_weight = max(geometry[1].a + geometry[3].a + geometry[5].a, 1.0)
+	damping = 0.1
+	best_cost = math.inf
+	finite_difference_step = 1e-6
+
+	def residuals(candidate_angles: Sequence[float]) -> tuple[float, ...]:
+		parameters = tuple(
+			replace(joint, theta=joint.theta + angle)
+			for joint, angle in zip(geometry, candidate_angles)
+		)
+		transform = forward_kinematics(parameters)[-1]
+		position = frame_origin(transform)
+		roll, _, yaw = _roll_pitch_yaw(_rotation(transform))
+		return (
+			position[0] - target_position[0],
+			position[1] - target_position[1],
+			position[2] - target_position[2],
+			orientation_weight * _wrap_angle(roll - preserved_roll_yaw[0]),
+			orientation_weight * _wrap_angle(yaw - preserved_roll_yaw[1]),
+		)
+
+	for iteration in range(max_iterations + 1):
+		current_residual = residuals(angles)
+		position_error = math.sqrt(sum(value * value for value in current_residual[:3]))
+		roll_error = abs(current_residual[3]) / orientation_weight
+		yaw_error = abs(current_residual[4]) / orientation_weight
+		if position_error <= tolerance and roll_error <= tolerance and yaw_error <= tolerance:
+			return PositionIKSolution(tuple(_wrap_angle(angle) for angle in angles), position_error, iteration)
+		if iteration == max_iterations:
+			break
+
+		jacobian_columns = []
+		for joint_index in range(6):
+			perturbed = list(angles)
+			perturbed[joint_index] += finite_difference_step
+			perturbed_residual = residuals(perturbed)
+			jacobian_columns.append(tuple(
+				(perturbed_residual[row] - current_residual[row]) / finite_difference_step
+				for row in range(5)
+			))
+		gram = tuple(
+			tuple(
+				sum(jacobian_columns[column][row] * jacobian_columns[column][other] for column in range(6))
+				+ (damping * damping if row == other else 0.0)
+				for other in range(5)
+			)
+			for row in range(5)
+		)
+		try:
+			dual_step = _solve_linear_system(gram, current_residual)
+		except ArithmeticError:
+			return None
+		joint_step = tuple(
+		sum(jacobian_columns[column][row] * dual_step[row] for row in range(5))
+			for column in range(6)
+		)
+		step_norm = math.sqrt(sum(value * value for value in joint_step))
+		step_scale = min(1.0, 0.25 / max(step_norm, 1e-12))
+		candidate_angles = [angles[index] - step_scale * joint_step[index] for index in range(6)]
+		candidate_residual = residuals(candidate_angles)
+		candidate_cost = sum(value * value for value in candidate_residual)
+		current_cost = sum(value * value for value in current_residual)
+		if candidate_cost < current_cost:
+			angles = candidate_angles
+			best_cost = candidate_cost
+			damping = max(1e-5, damping * 0.7)
+		else:
+			damping = min(10.0, damping * 2.0)
+			if damping >= 10.0 and candidate_cost >= best_cost:
+				break
+			best_cost = min(best_cost, candidate_cost)
+	return None
+
+
 def inverse_kinematics_position(
 	target_position: Vector3,
 	geometry: Sequence[DHParameters],
