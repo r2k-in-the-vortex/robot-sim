@@ -124,17 +124,17 @@ $$
 \begin{bmatrix}r_{13}\\r_{23}\\r_{33}\end{bmatrix}.
 $$
 
-Here $[r_{13},r_{23},r_{33}]^T$ is the end-effector's local $Z$ axis expressed in base coordinates (the third column of $R_0^6$). Thus the end-effector position alone determines J6, but finding J5 also requires the desired end-effector orientation, or at least its $Z$-axis direction.
+Here $[r_{13},r_{23},r_{33}]^T$ is the end-effector's local $Z$ axis expressed in base coordinates (the third column of $R_0^6$). Thus the end-effector position alone gives $P_6$, but finding $P_5$ also requires the desired end-effector orientation, or at least its $Z$-axis direction.
 
 ### 2. Robot handedness and branch choices
 
-Inverse kinematics can have multiple branches. For position, test both J1
-plane orientations and both elbow configurations; for a full-pose target, also
-test the wrist configurations allowed by the orientation constraints. These
-choices form a branch tree, but joint limits, collisions, and reachability can
-reject any candidate. The branches are not independent: for this DH table,
-position determines $\theta_3+\theta_4$, so a J3 value requires a chosen or
-otherwise solved $\theta_4$.
+Inverse kinematics can have multiple branches. For this DH table, test both J1
+plane orientations and both planar elbow configurations. Joint limits,
+reachability, and collision checks can reject candidates. Also, $a_3=d_3=0$
+and $\alpha_3=0$, so joints 3 and 4 are coaxial in this ideal DH model: the
+pose depends on their sum $\psi=\theta_3+\theta_4$, not on each angle
+individually. Position and orientation therefore cannot distinguish their
+individual values; choose a split that satisfies the joint limits.
 
 ### 3. Find the J1 angle and reduce to a plane
 
@@ -173,85 +173,66 @@ If $r=0$, the azimuth $\phi$ is undefined; position alone cannot determine
 $\theta_1$, so handle that as a singular case rather than evaluating
 $\operatorname{atan2}(0,0)$.
 
-### 4. Calculate J3 angle
+### 4. Calculate the planar elbow angle
 
-For this robot, $a_3=0$, so the planar triangle has link lengths
-$L_2=a_2=0.4$ and $L_4=a_4=0.3$. For each J1 branch $\sigma$, use its 2D
-target $(q_\sigma,h)$ from the previous section and define
+The planar triangle has link lengths $L_2=a_2=0.4$ and $L_4=a_4=0.3$. For
+each J1 branch $\sigma$, use its 2D target $(q_\sigma,h)$ and define
 
 $$
 D_\sigma=\sqrt{q_\sigma^2+h^2}.
 $$
 
-This is the distance from J1 frame origin $P_1$ to $P_5$. The two elbow
-branches are the two signs of the relative link angle $\beta$. By the law of
-cosines,
+This is the distance from $P_1$ to $P_5$. The law of cosines gives two
+candidate values for the relative direction of the second link, which for
+this robot is the combined angle $\psi=\theta_3+\theta_4$:
 
 $$
-\cos\beta_\sigma=
+\cos\psi_\sigma=
 \frac{D_\sigma^2-L_2^2-L_4^2}{2L_2L_4},
 \qquad
-\beta_{\sigma,\pm}=\pm\cos^{-1}\left(
+\psi_{\sigma,\pm}=\pm\cos^{-1}\left(
 \frac{D_\sigma^2-L_2^2-L_4^2}{2L_2L_4}
 \right).
 $$
 
-For either elbow branch, the corresponding J2 angle is
-
-$$
-θ_{2,\sigma,\pm}
-=\operatorname{atan2}(h,q_\sigma)
--\operatorname{atan2}\left(
-L_4\sin\beta_{\sigma,\pm},\ L_2+L_4\cos\beta_{\sigma,\pm}
-\right).
-$$
-
-With these standard DH parameters, the direction of the $a_4$ link is set by
-$\theta_2+\theta_3+\theta_4$. Therefore the position solve gives
-$\beta=\theta_3+\theta_4$, not $\theta_3$ alone. Once $\theta_4$ has been
-selected or determined from the desired orientation, each branch gives
-
-$$
-θ_{3,\sigma,\pm}
-=\beta_{\sigma,\pm}-\theta_4
-\pmod{2\pi}.
-$$
-
-Evaluate these two elbow branches for both $\sigma=+1$ and $\sigma=-1$; reject
-any branch for which $|L_2-L_4|\le D_\sigma\le L_2+L_4$ is not satisfied. Then
-apply joint limits, orientation constraints, and collision checks to the
-remaining candidates. If $\theta_4=0$, the J3 candidates are simply
-$\theta_{3,\sigma,\pm}=\beta_{\sigma,\pm}$
+For each J1 branch, a solution exists only if
+$|L_2-L_4|\le D_\sigma\le L_2+L_4$. Clamp the cosine argument to $[-1,1]$
+only to absorb small floating-point errors; otherwise reject an unreachable
+target. Both signs are the elbow branches. The target determines $\psi$, not
+$\theta_3$ by itself.
 
 ### 5. Calculate J2 from P5 and the selected branches
 
-For a selected J1 branch, express $P_5$ relative to $P_1$ in the 2D plane as
-$(q_\sigma,h)$. Let $\delta=\theta_3+\theta_4$ be the relative direction of
-the $a_4$ link with respect to the $a_2$ link. The planar position equations
-are
+For each selected J1 and elbow branch, let $\psi=\psi_{\sigma,\pm}$ from the
+previous section. The planar position equations are
 
 $$
-q_\sigma=L_2\cos\theta_2+L_4\cos(\theta_2+\delta),
+q_\sigma=L_2\cos\theta_2+L_4\cos(\theta_2+\psi),
 \qquad
-h=L_2\sin\theta_2+L_4\sin(\theta_2+\delta).
+h=L_2\sin\theta_2+L_4\sin(\theta_2+\psi).
 $$
 
 Solving for $\theta_2$ gives
 
 $$
-	heta_2=
+θ_2=
 \operatorname{atan2}(h,q_\sigma)
 -\operatorname{atan2}\left(
-L_4\sin\delta,\ L_2+L_4\cos\delta
+L_4\sin\psi,\ L_2+L_4\cos\psi
 \right).
 $$
 
-If $\theta_3$ is known and $\theta_4$ is fixed, substitute
-$\delta=\theta_3+\theta_4$. In particular, if $\theta_4=0$, then
-$\delta=\theta_3$. If only $\theta_3$ is known but $\theta_4$ is free,
-$P_5$, J1, and J3 do not determine a unique J2; the position constrains the
-sum $\theta_3+\theta_4$ instead. Use radians in these equations, and wrap the
-result to the robot's joint-angle convention before checking joint limits.
+Only the sum $\psi=\theta_3+\theta_4$ is determined by this position solve.
+Because joints 3 and 4 are coaxial with no intervening translation or twist,
+the full DH pose also depends on them only through this sum. Choose any
+$\theta_3$ within its limits and set
+
+$$
+θ_4=\operatorname{wrap}(\psi-\theta_3).
+$$
+
+Use radians in these equations and check all joint limits for the selected
+branch and split.
 
 ### 6. Calculate J4
 
@@ -281,9 +262,9 @@ R_0^4=R_0^3R_z(\theta_4)R_x(\alpha_4),
 \qquad \alpha_4=\frac{\pi}{2}.
 $$
 
-This determines $\theta_4$ modulo $2\pi$ for the selected upstream branch.
-Calculating $\theta_5$ is a later step: it requires the desired orientation,
-or the target position $P_6$ as well as $P_5$.
+This recovers $\theta_4$ once a value of $\theta_3$ has been chosen. It should
+agree with $\operatorname{wrap}(\psi-\theta_3)$ from the planar solve. The two
+are not independently determined by the target pose; only their sum is.
 
 ### 7. Calculate J5
 
