@@ -4,11 +4,12 @@
     "angles": "degrees",
     "lengths": "model_units"
   },
+  "show_mesh_edges": false,
   "joints": [
     {
       "theta_deg": 0.0,
       "d": 0.3,
-      "a": 0.0,
+      "a": 0.1,
       "alpha_deg": 90.0
     },
     {
@@ -20,13 +21,13 @@
     {
       "theta_deg": 0.0,
       "d": 0.0,
-      "a": 0.35,
+      "a": 0.0,
       "alpha_deg": 0.0
     },
     {
       "theta_deg": 0.0,
-      "d": 0.3,
-      "a": 0.0,
+      "d": 0.0,
+      "a": 0.3,
       "alpha_deg": 90.0
     },
     {
@@ -37,14 +38,14 @@
     },
     {
       "theta_deg": 0.0,
-      "d": 0.12,
-      "a": 0.0,
+      "d": 0.0,
+      "a": 0.12,
       "alpha_deg": 0.0
     }
   ],
   "meshes": [
     {
-      "path": "C:\\Users\\rkord\\Downloads\\cilindro.stl",
+      "path": "",
       "offset": [
         0.0,
         0.0,

@@ -287,4 +287,34 @@ or the target position $P_6$ as well as $P_5$.
 
 ### 7. Calculate J5
 
-Knowing J1-4, P6 with rotation, and P5 without rotation, J5 can be calculated
+Since $a_5=d_5=0$, frames 4 and 5 have the same origin, so
+${}^0\mathbf{p}_5$ is already known. The J6 offset is $d_6=0.12$ along the
+local $Z$ axis of frame 5. Express the directed vector from P5 to P6 in frame
+4 and normalize it:
+
+$$
+\mathbf{u}_5=(R_0^4)^T
+\frac{{}^0\mathbf{p}_6-{}^0\mathbf{p}_5}{d_6}.
+$$
+
+For $\alpha_5=-\pi/2$, standard DH gives
+$\mathbf{u}_5=[-\sin\theta_5,\ \cos\theta_5,\ 0]^T$, hence
+
+$$
+θ_5=\operatorname{atan2}(-u_{5x},u_{5y})
+\pmod{2\pi}.
+$$
+
+Check that $\|{}^0\mathbf{p}_6-{}^0\mathbf{p}_5\|=d_6$ and $u_{5z}=0$
+within numerical tolerance. If the target pose also supplies $R_0^6$, the
+remaining wrist angle can be recovered from
+
+$$
+R_4^6=(R_0^4)^T R_0^6,
+\qquad
+R_z(\theta_6)=R_x(\pi/2)R_z(-\theta_5)R_4^6,
+$$
+
+so $\theta_6=\operatorname{atan2}([R_z(\theta_6)]_{21},
+[R_z(\theta_6)]_{11})$. This also provides an orientation consistency check
+for the selected upstream and wrist branches.
