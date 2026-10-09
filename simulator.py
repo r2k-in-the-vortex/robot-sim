@@ -24,6 +24,7 @@ from kinematics import (
 	forward_kinematics,
 	frame_origin,
 	inverse_kinematics,
+	inverse_kinematics_position,
 )
 
 DEFAULT_DH_VALUES = (
@@ -176,29 +177,40 @@ class RobotArmSimulator:
 			geometry,
 			preferred_theta3=math.radians(joint_angles_degrees[2]),
 		)
-		if not solutions:
-			self.jog_status_label.configure(text="No reachable IK solution for that step.")
-			return
-
 		current_angles = tuple(math.radians(angle) for angle in joint_angles_degrees)
-		best_solution = min(
-			solutions,
-			key=lambda solution: sum(
-				math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
-				for candidate, current in zip(solution.angles, current_angles)
-			),
-		)
-		for entry, angle in zip(self.joint_angle_entries, best_solution.angles):
+		orientation_adjusted = False
+		if solutions:
+			new_angles = min(
+				solutions,
+				key=lambda solution: sum(
+					math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
+					for candidate, current in zip(solution.angles, current_angles)
+				),
+			).angles
+		else:
+			position_solution = inverse_kinematics_position(
+				tuple(target_pose[axis][3] for axis in range(3)),
+				geometry,
+				initial_angles=current_angles,
+			)
+			if position_solution is None:
+				self.jog_status_label.configure(text="No reachable IK solution for that step.")
+				return
+			new_angles = position_solution.angles
+			orientation_adjusted = True
+
+		for entry, angle in zip(self.joint_angle_entries, new_angles):
 			entry.delete(0, tk.END)
 			entry.insert(0, self._format_value(math.degrees(angle)))
 		self.parameters = self._to_dh_parameters(
 			static_values,
-			tuple(math.degrees(angle) for angle in best_solution.angles),
+			tuple(math.degrees(angle) for angle in new_angles),
 		)
 		self._render_scene()
 		axis_name = "XYZ"[axis]
 		displacement = direction * step
-		self.jog_status_label.configure(text=f"Moved {axis_name} {displacement:+g}")
+		orientation_note = " (orientation adjusted)" if orientation_adjusted else ""
+		self.jog_status_label.configure(text=f"Moved {axis_name} {displacement:+g}{orientation_note}")
 
 	def _build_parameter_tab(self) -> None:
 		self.parameter_notebook = ttk.Notebook(self.parameters_tab)

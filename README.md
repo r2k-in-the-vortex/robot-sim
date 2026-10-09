@@ -48,9 +48,11 @@ multiplying these joint by joint, yields each joint location
 
 6) The 3D View includes Cartesian jog controls for base-frame X, Y, and Z. Set
 the step length in model units and choose a positive or negative axis button.
-Each jog offsets the current T6 position, keeps its orientation fixed, solves
-the new pose with inverse kinematics, and applies the closest valid joint
-solution. An unreachable step leaves the robot at its current pose.
+Each jog offsets the current T6 position and first attempts to preserve its
+orientation while solving with inverse kinematics. If fixed-orientation IK has
+no solution, position-only IK is used and the orientation may change. The
+closest valid joint solution is applied; an unreachable step leaves the robot
+at its current pose.
 
 6) The front display has controls to jog the robot in X, Y, Z directions by a given step length.
 The mechanism of that is that the step offset from current T6 is used to calculate new T6', which is fed into inverse kinematics to calculate new joint angles, which are used to update the robot position

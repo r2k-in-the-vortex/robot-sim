@@ -22,6 +22,15 @@ class InverseKinematicsSolution:
 
 
 @dataclass(frozen=True)
+class PositionIKSolution:
+	"""A joint solution matching a Cartesian position, with orientation free."""
+
+	angles: tuple[float, float, float, float, float, float]
+	position_error: float
+	iterations: int
+
+
+@dataclass(frozen=True)
 class DHParameters:
 	"""Standard DH values for one revolute joint; angles are in radians."""
 
@@ -134,6 +143,129 @@ def _multiply3(
 
 def _wrap_angle(angle: float) -> float:
 	return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def _solve_linear3(
+	matrix: tuple[tuple[float, float, float], ...], vector: Vector3
+) -> Vector3:
+	"""Solve a 3x3 linear system with pivoted Gaussian elimination."""
+	augmented = [list(matrix[row]) + [vector[row]] for row in range(3)]
+	for column in range(3):
+		pivot = max(range(column, 3), key=lambda row: abs(augmented[row][column]))
+		if abs(augmented[pivot][column]) < 1e-15:
+			raise ArithmeticError("Singular damped Jacobian system")
+		augmented[column], augmented[pivot] = augmented[pivot], augmented[column]
+		pivot_value = augmented[column][column]
+		for index in range(column, 4):
+			augmented[column][index] /= pivot_value
+		for row in range(3):
+			if row == column:
+				continue
+			factor = augmented[row][column]
+			for index in range(column, 4):
+				augmented[row][index] -= factor * augmented[column][index]
+	return (augmented[0][3], augmented[1][3], augmented[2][3])
+
+
+def inverse_kinematics_position(
+	target_position: Vector3,
+	geometry: Sequence[DHParameters],
+	*,
+	initial_angles: Sequence[float] | None = None,
+	tolerance: float = 1e-6,
+	max_iterations: int = 200,
+) -> PositionIKSolution | None:
+	"""Find a position-matching pose while allowing end-effector orientation to vary.
+
+	Uses damped least squares seeded from the current runtime joint angles. This
+	mode is useful for Cartesian position jogging on mechanisms with fewer than
+	six independent axes, where preserving arbitrary orientation can be
+	overconstrained. Geometry theta values are static offsets; returned angles
+	are runtime joint angles in radians.
+	"""
+	_validate_supported_geometry(geometry, tolerance)
+	if len(target_position) != 3 or not all(math.isfinite(value) for value in target_position):
+		raise ValueError("target_position must contain three finite values")
+	if not math.isfinite(tolerance) or tolerance <= 0 or max_iterations <= 0:
+		raise ValueError("tolerance and max_iterations must be positive")
+	if initial_angles is None:
+		angles = [0.0] * 6
+	else:
+		if len(initial_angles) != 6 or not all(math.isfinite(value) for value in initial_angles):
+			raise ValueError("initial_angles must contain six finite runtime angles")
+		angles = list(initial_angles)
+
+	damping = 0.1
+	best_error = math.inf
+	for iteration in range(max_iterations + 1):
+		parameters = tuple(
+			replace(joint, theta=joint.theta + angle)
+			for joint, angle in zip(geometry, angles)
+		)
+		transforms = forward_kinematics(parameters)
+		position = frame_origin(transforms[-1])
+		error = tuple(target_position[axis] - position[axis] for axis in range(3))
+		error_norm = math.sqrt(sum(component * component for component in error))
+		if error_norm <= tolerance:
+			return PositionIKSolution(tuple(_wrap_angle(angle) for angle in angles), error_norm, iteration)
+		if iteration == max_iterations:
+			break
+
+		jacobian_columns = []
+		for joint_index in range(6):
+			if joint_index == 0:
+				previous_rotation = (
+					(1.0, 0.0, 0.0),
+					(0.0, 1.0, 0.0),
+					(0.0, 0.0, 1.0),
+				)
+				joint_origin = (0.0, 0.0, 0.0)
+			else:
+				previous = transforms[joint_index - 1]
+				previous_rotation = _rotation(previous)
+				joint_origin = frame_origin(previous)
+			axis = tuple(previous_rotation[row][2] for row in range(3))
+			to_tool = tuple(position[axis_index] - joint_origin[axis_index] for axis_index in range(3))
+			jacobian_columns.append((
+				axis[1] * to_tool[2] - axis[2] * to_tool[1],
+				axis[2] * to_tool[0] - axis[0] * to_tool[2],
+				axis[0] * to_tool[1] - axis[1] * to_tool[0],
+			))
+
+		gram = tuple(
+			tuple(
+				sum(jacobian_columns[column][row] * jacobian_columns[column][other] for column in range(6))
+				+ (damping * damping if row == other else 0.0)
+				for other in range(3)
+			)
+			for row in range(3)
+		)
+		try:
+			dual_step = _solve_linear3(gram, error)  # type: ignore[arg-type]
+		except ArithmeticError:
+			return None
+		joint_step = tuple(
+		sum(jacobian_columns[column][axis] * dual_step[axis] for axis in range(3))
+			for column in range(6)
+		)
+		step_scale = min(1.0, 0.25 / max(math.sqrt(sum(value * value for value in joint_step)), 1e-12))
+		candidate_angles = [angles[index] + step_scale * joint_step[index] for index in range(6)]
+		candidate_parameters = tuple(
+			replace(joint, theta=joint.theta + angle)
+			for joint, angle in zip(geometry, candidate_angles)
+		)
+		candidate_position = frame_origin(forward_kinematics(candidate_parameters)[-1])
+		candidate_error = math.dist(candidate_position, target_position)
+		if candidate_error < error_norm:
+			angles = candidate_angles
+			best_error = candidate_error
+			damping = max(1e-4, damping * 0.7)
+		else:
+			damping = min(10.0, damping * 2.0)
+			if damping >= 10.0 and candidate_error >= best_error:
+				break
+			best_error = min(best_error, candidate_error)
+	return None
 
 
 def _validate_supported_geometry(parameters: Sequence[DHParameters], tolerance: float) -> None:

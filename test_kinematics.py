@@ -8,8 +8,16 @@ import random
 import unittest
 from dataclasses import replace
 from pathlib import Path
+import tkinter as tk
 
-from kinematics import DHParameters, compose_dh_parameters, forward_kinematics, inverse_kinematics
+from kinematics import (
+	DHParameters,
+	compose_dh_parameters,
+	forward_kinematics,
+	frame_origin,
+	inverse_kinematics,
+	inverse_kinematics_position,
+)
 from simulator import offset_pose_translation
 
 
@@ -168,6 +176,56 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 						direction * step if row == axis else 0.0,
 					)
 				self.assertTrue(inverse_kinematics(target_pose, self.geometry))
+
+	def test_plus_y_jog_from_requested_t6_position_is_reachable(self) -> None:
+		startup_pose = [list(row) for row in forward_kinematics(self.geometry)[-1]]
+		startup_pose[0][3] = 36.0
+		startup_pose[1][3] = 0.0
+		startup_pose[2][3] = 58.0
+		current_pose = tuple(tuple(row) for row in startup_pose)
+		self.assertTrue(inverse_kinematics(current_pose, self.geometry))
+
+		target_pose = offset_pose_translation(current_pose, 1, 1.0)
+		self.assertFalse(inverse_kinematics(target_pose, self.geometry))
+		position_solution = inverse_kinematics_position(
+			(36.0, 1.0, 58.0), self.geometry, initial_angles=(0.0,) * 6
+		)
+		self.assertIsNotNone(position_solution)
+		assert position_solution is not None
+		achieved_pose = forward_kinematics(
+			parameters_at_angles(self.geometry, position_solution.angles)
+		)[-1]
+		for actual, expected in zip(frame_origin(achieved_pose), (36.0, 1.0, 58.0)):
+			self.assertAlmostEqual(actual, expected, delta=1e-5)
+
+	def test_tk_y_jog_applies_position_solution(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			start_solution = inverse_kinematics_position(
+				(36.0, 0.0, 58.0), self.geometry, initial_angles=(0.0,) * 6
+			)
+			self.assertIsNotNone(start_solution)
+			assert start_solution is not None
+			for entry, angle in zip(app.joint_angle_entries, start_solution.angles):
+				entry.delete(0, tk.END)
+				entry.insert(0, str(math.degrees(angle)))
+			self.assertTrue(app._apply_from_entries())
+			start_position = frame_origin(forward_kinematics(app.parameters)[-1])
+			for actual, expected in zip(start_position, (36.0, 0.0, 58.0)):
+				self.assertAlmostEqual(actual, expected, delta=1e-5)
+			app.jog_step_entry.delete(0, tk.END)
+			app.jog_step_entry.insert(0, "1")
+			app._jog_cartesian(1, 1)
+			self.assertIn("Moved Y +1 (orientation adjusted)", app.jog_status_label.cget("text"))
+			achieved = frame_origin(forward_kinematics(app.parameters)[-1])
+			for actual, expected in zip(achieved, (36.0, 1.0, 58.0)):
+				self.assertAlmostEqual(actual, expected, delta=1e-5)
+		finally:
+			app.root.destroy()
 
 
 if __name__ == "__main__":
