@@ -126,93 +126,99 @@ $$
 
 Here $[r_{13},r_{23},r_{33}]^T$ is the end-effector's local $Z$ axis expressed in base coordinates (the third column of $R_0^6$). Thus the end-effector position alone determines J6, but finding J5 also requires the desired end-effector orientation, or at least its $Z$-axis direction.
 
-### 2. Find the J1 angle and reduce to a plane
+### 2. Robot handedness and branch choices
 
-The J1 axis lies on base $Z$, so its origin $P_1$ has $x_1=y_1=0$. The
-points $P_1$ through $P_5$ lie in the vertical plane selected by $\theta_1$.
-The azimuth of $P_5$ around base $Z$ gives the angle of that plane:
+Inverse kinematics can have multiple branches. For position, test both J1
+plane orientations and both elbow configurations; for a full-pose target, also
+test the wrist configurations allowed by the orientation constraints. These
+choices form a branch tree, but joint limits, collisions, and reachability can
+reject any candidate. The branches are not independent: for this DH table,
+position determines $\theta_3+\theta_4$, so a J3 value requires a chosen or
+otherwise solved $\theta_4$.
 
-$$
-	heta_1 = \operatorname{atan2}(y_5-y_1,\ x_5-x_1)
-= \operatorname{atan2}(y_5,\ x_5).
-$$
+### 3. Find the J1 angle and reduce to a plane
 
-Here $\operatorname{atan2}(y,x)$ returns the quadrant-correct angle, typically
-in $(-\pi,\pi]$. This expression uses a nonnegative planar radius
-$\rho=\sqrt{x_5^2+y_5^2}$. If the planar solution instead uses a signed radius,
-the equivalent representation $\theta_1+\pi$ with radius $-\rho$ must also be
-considered. Once the branch is chosen, rotate the target and arm geometry by
-$-\theta_1$ about base $Z$; the remaining positions then lie in a 2D plane for
-solving the other joint angles.
-
-Thus the first joint angle is
+The J1 rotation axis lies on base $Z$. In the current DH table, however,
+$a_1=0.1$, so the frame origin $P_1$ is offset from that axis. The plane
+containing $P_1$ through $P_5$ can have either of two azimuths, separated by
+$\pi$. Let $r=\sqrt{x_5^2+y_5^2}$ and define $\sigma\in\{+1,-1\}$ to select
+the plane orientation:
 
 $$
-	heta_1 = \operatorname{atan2}(y_5,\ x_5).
-$$
-
-Rotate $P_5$ by $-\theta_1$ about base $Z$ to align the arm's plane with the
-base $XZ$ plane. Since $P_1=(0,0,d_1)$ and this robot has $d_1=0.3$, the
-resulting coordinates relative to J1 are
-
-$$
-{}^1\mathbf{p}_{5,\mathrm{plane}}
-= R_z(-\theta_1)\left({}^0\mathbf{p}_5-{}^0\mathbf{p}_1\right)
-= \begin{bmatrix}
-\cos\theta_1 & \sin\theta_1 & 0 \\
--\sin\theta_1 & \cos\theta_1 & 0 \\
-0 & 0 & 1
-\end{bmatrix}
-\begin{bmatrix}x_5\\y_5\\z_5-0.3\end{bmatrix}
-= \begin{bmatrix}\rho\\0\\z_5-0.3\end{bmatrix},
+\phi=\operatorname{atan2}(y_5,x_5),
 \qquad
-\rho=\sqrt{x_5^2+y_5^2}.
+θ_1^{(\sigma)}=\operatorname{atan2}(\sigma y_5,\sigma x_5).
 $$
 
-So the 2D target for the remaining planar solve is $(\rho,\ z_5-0.3)$ in
-radial-height coordinates measured from J1. The rotated point in base
-coordinates, before subtracting J1, is $(\rho,0,z_5)$.
+Equivalently, $\theta_1^{(+)}=\phi$ and
+$\theta_1^{(-)}=\operatorname{wrap}(\phi+\pi)$. Rotating $P_5$ into each
+candidate plane and measuring from the actual frame origin $P_1$ gives the
+signed planar radial target
 
-### 3. Calculate J3 angle
+$$
+q_\sigma=\sigma r-a_1=\sigma r-0.1,
+\qquad
+h=z_5-d_1=z_5-0.3.
+$$
+
+Thus each J1 branch gives a different 2D target relative to J1:
+
+$$
+{}^1\mathbf{p}_{5,\mathrm{plane}}^{(\sigma)}
+=\begin{bmatrix}q_\sigma\\h\end{bmatrix}
+=\begin{bmatrix}\sigma\sqrt{x_5^2+y_5^2}-0.1\\z_5-0.3\end{bmatrix}.
+$$
+
+If $r=0$, the azimuth $\phi$ is undefined; position alone cannot determine
+$\theta_1$, so handle that as a singular case rather than evaluating
+$\operatorname{atan2}(0,0)$.
+
+### 4. Calculate J3 angle
 
 For this robot, $a_3=0$, so the planar triangle has link lengths
-$L_2=a_2=0.4$ and $L_4=a_4=0.3$. Let the 2D target relative to J1 be
-$(\rho,h)$, where $h=z_5-d_1$ as above, and let
+$L_2=a_2=0.4$ and $L_4=a_4=0.3$. For each J1 branch $\sigma$, use its 2D
+target $(q_\sigma,h)$ from the previous section and define
 
 $$
-D=\sqrt{\rho^2+h^2}
+D_\sigma=\sqrt{q_\sigma^2+h^2}.
 $$
 
-be the distance from $P_1$ to $P_5$. By the law of cosines, the interior angle
-$\gamma$ at $P_2$ is
+This is the distance from J1 frame origin $P_1$ to $P_5$. The two elbow
+branches are the two signs of the relative link angle $\beta$. By the law of
+cosines,
 
 $$
-\gamma=\cos^{-1}\left(\frac{L_2^2+L_4^2-D^2}{2L_2L_4}\right).
-$$
-
-When the two links are straight and point in the same direction, $\gamma=\pi$
-and the relative joint rotation is zero. The two elbow branches for the relative
-orientation of the second link are therefore
-
-$$
-\delta_+ = \pi-\gamma,
+\cos\beta_\sigma=
+\frac{D_\sigma^2-L_2^2-L_4^2}{2L_2L_4},
 \qquad
-\delta_- = \gamma-\pi,
-\qquad
-\delta = \theta_3+\theta_4 \pmod{2\pi}.
+\beta_{\sigma,\pm}=\pm\cos^{-1}\left(
+\frac{D_\sigma^2-L_2^2-L_4^2}{2L_2L_4}
+\right).
 $$
 
-Thus, if $\theta_4$ is known or constrained, the two J3 candidates are
+For either elbow branch, the corresponding J2 angle is
 
 $$
-θ_{3,+}=\pi-\gamma-θ_4,
-\qquad
-θ_{3,-}=\gamma-\pi-θ_4
+θ_{2,\sigma,\pm}
+=\operatorname{atan2}(h,q_\sigma)
+-\operatorname{atan2}\left(
+L_4\sin\beta_{\sigma,\pm},\ L_2+L_4\cos\beta_{\sigma,\pm}
+\right).
+$$
+
+With these standard DH parameters, the direction of the $a_4$ link is set by
+$\theta_2+\theta_3+\theta_4$. Therefore the position solve gives
+$\beta=\theta_3+\theta_4$, not $\theta_3$ alone. Once $\theta_4$ has been
+selected or determined from the desired orientation, each branch gives
+
+$$
+θ_{3,\sigma,\pm}
+=\beta_{\sigma,\pm}-\theta_4
 \pmod{2\pi}.
 $$
 
-If $\theta_4=0$, these reduce to $\theta_3=\pi-\gamma$ or
-$\theta_3=\gamma-\pi$. Without a known $\theta_4$ or an end-effector
-orientation constraint, position alone determines $\theta_3+\theta_4$, not
-$\theta_3$ separately. A real-valued triangle solution also requires
-$|L_2-L_4|\le D\le L_2+L_4$.
+Evaluate these two elbow branches for both $\sigma=+1$ and $\sigma=-1$; reject
+any branch for which $|L_2-L_4|\le D_\sigma\le L_2+L_4$ is not satisfied. Then
+apply joint limits, orientation constraints, and collision checks to the
+remaining candidates. If $\theta_4=0$, the J3 candidates are simply
+$\theta_{3,\sigma,\pm}=\beta_{\sigma,\pm}$
