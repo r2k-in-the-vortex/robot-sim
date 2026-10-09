@@ -19,10 +19,11 @@ scroll wheel to zoom. The **Parameters** tab contains separate **DH Parameters**
 and **Meshes** tabs. DH values are editable per joint; angles are entered in
 degrees, while `d`, `a`, and mesh offsets use consistent model units. Each mesh
 can have a local XYZ offset and local X/Y/Z Euler rotations applied in that
-order, in degrees. Opacity ranges from 0 (transparent) to 1 (opaque). Apply
-changes to update the view. Save JSON and Load JSON persist all DH and mesh
-settings in `robot_parameters.json`; mesh paths are stored relative to the
-configuration file when possible. The included DH values are illustrative
+order, in degrees. Opacity ranges from 0 (transparent) to 1 (opaque). Use
+**Show triangle edges** in the Meshes tab to toggle mesh outlines; it is off by
+default. Apply changes to update the view. Save JSON and Load JSON persist all
+DH and mesh settings in `robot_parameters.json`; mesh paths are stored relative
+to the configuration file when possible. The included DH values are illustrative
 starter dimensions, not measurements for a specific robot.
 
 1) next we need mathematical model of forward transformation, to go from joint angles to joint positions and final end of arm positions. That is a series of matrix multiplications, for each of 6 axes, according to Denavit–Hartenberg Convention. We need function to create per joint martixes using parameters:

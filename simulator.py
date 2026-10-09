@@ -13,7 +13,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.backend_bases import MouseEvent
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.colors import LightSource, to_rgba
+from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from stl import mesh as stl_mesh
@@ -61,6 +61,7 @@ class RobotArmSimulator:
 		self._last_mouse_position: tuple[float, float] | None = None
 		self.parameters = self._to_dh_parameters(DEFAULT_DH_VALUES)
 		self.mesh_settings = self._default_mesh_settings()
+		self.show_mesh_edges = tk.BooleanVar(master=self.root, value=False)
 
 		self.notebook = ttk.Notebook(self.root)
 		self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -80,9 +81,10 @@ class RobotArmSimulator:
 		self._build_parameter_tab()
 		if self.config_path.exists():
 			try:
-				dh_values, mesh_settings = self._read_json_configuration()
+				dh_values, mesh_settings, show_mesh_edges = self._read_json_configuration()
 				self._populate_dh_entries(dh_values)
 				self._populate_mesh_entries(mesh_settings)
+				self.show_mesh_edges.set(show_mesh_edges)
 			except (OSError, ValueError, TypeError, KeyError) as error:
 				messagebox.showerror("Parameter file error", str(error), parent=self.root)
 		self.parameters = self._read_entry_parameters()
@@ -157,6 +159,12 @@ class RobotArmSimulator:
 			self.mesh_tab,
 			text="Offsets use model length units. Rotations are local X, then Y, then Z, in degrees.",
 		).grid(row=1, column=0, columnspan=10, sticky=tk.W, pady=(0, 14))
+		ttk.Checkbutton(
+			self.mesh_tab,
+			text="Show triangle edges",
+			variable=self.show_mesh_edges,
+			command=self._render_scene,
+		).grid(row=2, column=0, columnspan=10, sticky=tk.W, pady=(0, 8))
 
 		headings = (
 			"Frame", "STL file", "", "Offset X", "Offset Y", "Offset Z",
@@ -164,11 +172,11 @@ class RobotArmSimulator:
 		)
 		for column, heading in enumerate(headings):
 			ttk.Label(self.mesh_tab, text=heading, font=("Segoe UI", 9, "bold")).grid(
-				row=2, column=column, sticky=tk.W, padx=(0, 5), pady=(0, 6)
+				row=3, column=column, sticky=tk.W, padx=(0, 5), pady=(0, 6)
 			)
 
 		self.mesh_entries: list[MeshEntryWidgets] = []
-		for row_index, frame_name in enumerate(MESH_FRAME_NAMES, start=3):
+		for row_index, frame_name in enumerate(MESH_FRAME_NAMES, start=4):
 			ttk.Label(self.mesh_tab, text=frame_name).grid(
 				row=row_index, column=0, sticky=tk.W, padx=(0, 8), pady=4
 			)
@@ -303,6 +311,7 @@ class RobotArmSimulator:
 		data = {
 			"schema_version": 1,
 			"units": {"angles": "degrees", "lengths": "model_units"},
+			"show_mesh_edges": self.show_mesh_edges.get(),
 			"joints": [
 				{"theta_deg": theta, "d": d, "a": a, "alpha_deg": alpha}
 				for theta, d, a, alpha in values
@@ -336,7 +345,7 @@ class RobotArmSimulator:
 
 	def _read_json_configuration(
 		self,
-	) -> tuple[tuple[tuple[float, float, float, float], ...], tuple[MeshSetting, ...]]:
+	) -> tuple[tuple[tuple[float, float, float, float], ...], tuple[MeshSetting, ...], bool]:
 		data = json.loads(self.config_path.read_text(encoding="utf-8"))
 		if not isinstance(data, dict):
 			raise ValueError("Parameter file must contain a JSON object.")
@@ -361,8 +370,11 @@ class RobotArmSimulator:
 			raise ValueError("DH parameter values must all be finite numbers.")
 
 		mesh_data = data.get("meshes")
+		show_mesh_edges = data.get("show_mesh_edges", False)
+		if not isinstance(show_mesh_edges, bool):
+			raise ValueError("show_mesh_edges must be true or false.")
 		if mesh_data is None:
-			return dh_values, self._default_mesh_settings()
+			return dh_values, self._default_mesh_settings(), show_mesh_edges
 		if not isinstance(mesh_data, list) or len(mesh_data) != len(MESH_FRAME_NAMES):
 			raise ValueError("Parameter file must contain seven mesh settings: base and joints 1-6.")
 		mesh_settings = []
@@ -391,14 +403,14 @@ class RobotArmSimulator:
 					mesh_path = self.config_path.parent / mesh_path
 				path = str(mesh_path.resolve())
 			mesh_settings.append(MeshSetting(path, offset_values, rotation_values, opacity))
-		return dh_values, tuple(mesh_settings)
+		return dh_values, tuple(mesh_settings), show_mesh_edges
 
 	def _read_json_parameters(self) -> tuple[tuple[float, float, float, float], ...]:
 		return self._read_json_configuration()[0]
 
 	def _load_json(self) -> None:
 		try:
-			values, mesh_settings = self._read_json_configuration()
+			values, mesh_settings, show_mesh_edges = self._read_json_configuration()
 		except (OSError, ValueError, TypeError, KeyError) as error:
 			messagebox.showerror("Could not load parameters", str(error), parent=self.root)
 			return
@@ -406,6 +418,7 @@ class RobotArmSimulator:
 		self._populate_mesh_entries(mesh_settings)
 		self.parameters = self._to_dh_parameters(values)
 		self.mesh_settings = mesh_settings
+		self.show_mesh_edges.set(show_mesh_edges)
 		self._render_scene()
 
 	def _render_scene(self) -> None:
@@ -435,16 +448,17 @@ class RobotArmSimulator:
 				rotated_local = triangles @ local_rotation.T + np.asarray(setting.offset)
 				placed_triangles = rotated_local @ frame_rotation.T + np.asarray(origin)
 				mesh_vertices.append(placed_triangles.reshape(-1, 3))
-				face_colors = self._lit_face_colors(
+				face_colors = self._two_sided_face_colors(
 					placed_triangles, MESH_COLORS[frame_index], setting.opacity
 				)
-				self.axes.add_collection3d(
-					Poly3DCollection(
-						placed_triangles,
-						facecolors=face_colors,
-						edgecolors="none",
-					)
+				collection = Poly3DCollection(
+					placed_triangles,
+					facecolors=face_colors,
+					edgecolors="#25343b" if self.show_mesh_edges.get() else "none",
+					linewidths=0.25 if self.show_mesh_edges.get() else 0,
 				)
+				collection.set_alpha(setting.opacity)
+				self.axes.add_collection3d(collection)
 			except (OSError, RuntimeError, ValueError) as error:
 				mesh_errors.append(f"{MESH_FRAME_NAMES[frame_index]}: {error}")
 
@@ -514,17 +528,53 @@ class RobotArmSimulator:
 		)
 
 	@staticmethod
-	def _lit_face_colors(triangles: np.ndarray, color: str, opacity: float) -> np.ndarray:
-		normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
-		lengths = np.linalg.norm(normals, axis=1)
-		normals = np.divide(
-			normals,
-			lengths[:, None],
-			out=np.zeros_like(normals),
-			where=lengths[:, None] > 0,
+	def _two_sided_face_colors(triangles: np.ndarray, color: str, opacity: float) -> np.ndarray:
+		face_normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+		vertices = triangles.reshape(-1, 3)
+		mesh_scale = max(float(np.ptp(vertices, axis=0).max()), 1.0)
+		vertex_keys, inverse = np.unique(
+			np.rint(vertices / (mesh_scale * 1e-7)).astype(np.int64),
+			axis=0,
+			return_inverse=True,
 		)
-		illumination = LightSource(azdeg=315, altdeg=45).shade_normals(normals)
-		illumination = 0.22 + illumination * 0.78
+		face_areas = np.linalg.norm(face_normals, axis=1)
+		face_normals = np.divide(
+			face_normals,
+			face_areas[:, None],
+			out=np.zeros_like(face_normals),
+			where=face_areas[:, None] > 0,
+		)
+		corner_normals = np.zeros((len(vertices), 3), dtype=float)
+		vertex_order = np.argsort(inverse)
+		vertex_counts = np.bincount(inverse, minlength=len(vertex_keys))
+		vertex_offsets = np.concatenate(([0], np.cumsum(vertex_counts)))
+		crease_cosine = math.cos(math.radians(50.0))
+		for vertex_index in range(len(vertex_keys)):
+			incident_corners = vertex_order[vertex_offsets[vertex_index]:vertex_offsets[vertex_index + 1]]
+			incident_faces = incident_corners // 3
+			incident_normals = face_normals[incident_faces]
+			compatible = incident_normals @ incident_normals.T >= crease_cosine
+			weighted_normals = compatible @ (face_normals[incident_faces] * face_areas[incident_faces, None])
+			corner_normals[incident_corners] = weighted_normals
+		corner_lengths = np.linalg.norm(corner_normals, axis=1)
+		corner_normals = np.divide(
+			corner_normals,
+			corner_lengths[:, None],
+			out=np.zeros_like(corner_normals),
+			where=corner_lengths[:, None] > 0,
+		)
+		smooth_normals = corner_normals.reshape(-1, 3, 3).mean(axis=1)
+		normal_lengths = np.linalg.norm(smooth_normals, axis=1)
+		smooth_normals = np.divide(
+			smooth_normals,
+			normal_lengths[:, None],
+			out=np.zeros_like(smooth_normals),
+			where=normal_lengths[:, None] > 0,
+		)
+		light_direction = np.asarray((0.35, -0.45, 0.82), dtype=float)
+		light_direction /= np.linalg.norm(light_direction)
+		diffuse = np.abs(smooth_normals @ light_direction)
+		illumination = 0.32 + 0.68 * diffuse
 		base_color = np.asarray(to_rgba(color)[:3])
 		rgb = np.clip(base_color[None, :] * illumination[:, None], 0, 1)
 		return np.column_stack((rgb, np.full(len(triangles), opacity)))
