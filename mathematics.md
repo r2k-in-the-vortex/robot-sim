@@ -222,3 +222,33 @@ any branch for which $|L_2-L_4|\le D_\sigma\le L_2+L_4$ is not satisfied. Then
 apply joint limits, orientation constraints, and collision checks to the
 remaining candidates. If $\theta_4=0$, the J3 candidates are simply
 $\theta_{3,\sigma,\pm}=\beta_{\sigma,\pm}$
+
+### 5. Calculate J2 from P5 and the selected branches
+
+For a selected J1 branch, express $P_5$ relative to $P_1$ in the 2D plane as
+$(q_\sigma,h)$. Let $\delta=\theta_3+\theta_4$ be the relative direction of
+the $a_4$ link with respect to the $a_2$ link. The planar position equations
+are
+
+$$
+q_\sigma=L_2\cos\theta_2+L_4\cos(\theta_2+\delta),
+\qquad
+h=L_2\sin\theta_2+L_4\sin(\theta_2+\delta).
+$$
+
+Solving for $\theta_2$ gives
+
+$$
+	heta_2=
+\operatorname{atan2}(h,q_\sigma)
+-\operatorname{atan2}\left(
+L_4\sin\delta,\ L_2+L_4\cos\delta
+\right).
+$$
+
+If $\theta_3$ is known and $\theta_4$ is fixed, substitute
+$\delta=\theta_3+\theta_4$. In particular, if $\theta_4=0$, then
+$\delta=\theta_3$. If only $\theta_3$ is known but $\theta_4$ is free,
+$P_5$, J1, and J3 do not determine a unique J2; the position constrains the
+sum $\theta_3+\theta_4$ instead. Use radians in these equations, and wrap the
+result to the robot's joint-angle convention before checking joint limits.
