@@ -252,3 +252,39 @@ $\delta=\theta_3$. If only $\theta_3$ is known but $\theta_4$ is free,
 $P_5$, J1, and J3 do not determine a unique J2; the position constrains the
 sum $\theta_3+\theta_4$ instead. Use radians in these equations, and wrap the
 result to the robot's joint-angle convention before checking joint limits.
+
+### 6. Calculate J4
+
+With $\theta_1$, $\theta_2$, and $\theta_3$ selected, the orientation $R_0^3$
+is known. Since this robot has $a_5=d_5=0$, frames 4 and 5 have the same
+origin, so $P_5-P_3$ is the fixed $a_4$ link vector. Express that vector in
+frame 3:
+
+$$
+\mathbf{v}_4=(R_0^3)^T
+\left({}^0\mathbf{p}_5-{}^0\mathbf{p}_3\right).
+$$
+
+Standard DH gives $\mathbf{v}_4=a_4[\cos\theta_4,\sin\theta_4,0]^T$.
+Therefore
+
+$$
+θ_4=\operatorname{atan2}(v_{4y},v_{4x}),
+\qquad a_4=0.3.
+$$
+
+The target must satisfy $\|\mathbf{v}_4\|=a_4$ and $v_{4z}=0$ within
+numerical tolerance. Once $\theta_4$ is found, the frame-4 orientation is
+
+$$
+R_0^4=R_0^3R_z(\theta_4)R_x(\alpha_4),
+\qquad \alpha_4=\frac{\pi}{2}.
+$$
+
+This determines $\theta_4$ modulo $2\pi$ for the selected upstream branch.
+Calculating $\theta_5$ is a later step: it requires the desired orientation,
+or the target position $P_6$ as well as $P_5$.
+
+### 7. Calculate J5
+
+Knowing J1-4, P6 with rotation, and P5 without rotation, J5 can be calculated
