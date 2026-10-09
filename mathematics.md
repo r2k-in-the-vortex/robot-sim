@@ -84,4 +84,44 @@ For a revolute joint, the measured joint angle changes $\theta_i$ while $d_i$ is
 constant. For a prismatic joint, the joint displacement changes $d_i$ while
 $\theta_i$ is constant. A robot-specific DH table supplies the constant link
 dimensions and offsets; this document defines the calculation but does not
-assume dimensions for a particular arm. The actual robot has no prismatic joints, only revolute joints, prismatic parameters are configuration constants.
+assume dimensions for a particular arm.
+
+The actual robot has no prismatic joints, only revolute joints, prismatic parameters are configuration constants.
+
+# Inverse kinematics
+
+The robot has only revolute joints, so the joint angles are the variables; all DH distances and link dimensions are fixed. For the configured arm, joint 5 has $d_5 = a_5 = 0$, and joint 6 has $d_6 = 0.12$, $a_6 = 0$, and $\alpha_6 = 0$. There is no additional tool transform, so frame 6 is the end-effector frame.
+
+### 1. Back out the J6 and J5 frame origins
+
+Write the desired end-effector pose as
+
+$$
+{}^0T_6 =
+\begin{bmatrix}
+R_0^6 & {}^0\mathbf{p}_6 \\
+\mathbf{0}^T & 1
+\end{bmatrix},
+\qquad
+{}^0\mathbf{p}_6 =
+\begin{bmatrix}x_6\\y_6\\z_6\end{bmatrix}.
+$$
+
+Because frame 6 is the end-effector frame, its origin is the target position:
+
+$$
+{}^0\mathbf{p}_{J6} = {}^0\mathbf{p}_6 = {}^0\mathbf{p}_{EE}.
+$$
+
+The J6 DH translation is $d_6$ along the preceding frame's $Z$ axis. Since $a_6 = 0$ and $\alpha_6 = 0$, the $Z$ axes of frames 5 and 6 are aligned, so the frame 5 (J5) origin is
+
+$$
+{}^0\mathbf{p}_{J5}
+= {}^0\mathbf{p}_5
+= {}^0\mathbf{p}_6 - d_6 R_0^6
+\begin{bmatrix}0\\0\\1\end{bmatrix}
+= {}^0\mathbf{p}_{EE} - 0.12
+\begin{bmatrix}r_{13}\\r_{23}\\r_{33}\end{bmatrix}.
+$$
+
+Here $[r_{13},r_{23},r_{33}]^T$ is the end-effector's local $Z$ axis expressed in base coordinates (the third column of $R_0^6$). Thus the end-effector position alone determines J6, but finding J5 also requires the desired end-effector orientation, or at least its $Z$-axis direction.
