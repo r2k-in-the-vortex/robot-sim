@@ -90,7 +90,7 @@ The actual robot has no prismatic joints, only revolute joints, prismatic parame
 
 # Inverse kinematics
 
-The robot has only revolute joints, so the joint angles are the variables; all DH distances and link dimensions are fixed. For the configured arm, joint 5 has $d_5 = a_5 = 0$, and joint 6 has $d_6 = 0.12$, $a_6 = 0$, and $\alpha_6 = 0$. There is no additional tool transform, so frame 6 is the end-effector frame.
+The robot has only revolute joints, so the joint angles are the variables; all DH distances and link dimensions are fixed. For the current configuration, joint 5 has $d_5 = a_5 = 0$, and joint 6 has $d_6 = 0$, $a_6 = 0.12$, and $\alpha_6 = 0$. There is no additional tool transform, so frame 6 is the end-effector frame.
 
 ### 1. Back out the J6 and J5 frame origins
 
@@ -113,18 +113,17 @@ $$
 {}^0\mathbf{p}_{J6} = {}^0\mathbf{p}_6 = {}^0\mathbf{p}_{EE}.
 $$
 
-The J6 DH translation is $d_6$ along the preceding frame's $Z$ axis. Since $a_6 = 0$ and $\alpha_6 = 0$, the $Z$ axes of frames 5 and 6 are aligned, so the frame 5 (J5) origin is
+Since $\alpha_6=0$, the frame-5 and frame-6 axes are aligned. The J6 translation expressed in frame 6 is $[a_6,0,d_6]^T$, so the frame-5 origin is
 
 $$
-{}^0\mathbf{p}_{J5}
-= {}^0\mathbf{p}_5
-= {}^0\mathbf{p}_6 - d_6 R_0^6
-\begin{bmatrix}0\\0\\1\end{bmatrix}
+{}^0\mathbf{p}_5
+= {}^0\mathbf{p}_6 - R_0^6
+\begin{bmatrix}a_6\\0\\d_6\end{bmatrix}
 = {}^0\mathbf{p}_{EE} - 0.12
-\begin{bmatrix}r_{13}\\r_{23}\\r_{33}\end{bmatrix}.
+\begin{bmatrix}r_{11}\\r_{21}\\r_{31}\end{bmatrix}.
 $$
 
-Here $[r_{13},r_{23},r_{33}]^T$ is the end-effector's local $Z$ axis expressed in base coordinates (the third column of $R_0^6$). Thus the end-effector position alone gives $P_6$, but finding $P_5$ also requires the desired end-effector orientation, or at least its $Z$-axis direction.
+Here $[r_{11},r_{21},r_{31}]^T$ is the end-effector's local $X$ axis in base coordinates, and the current $d_6=0$. Thus finding $P_5$ requires the desired orientation (or the local X-axis direction), not just the end-effector position.
 
 ### 2. Robot handedness and branch choices
 
@@ -268,33 +267,30 @@ are not independently determined by the target pose; only their sum is.
 
 ### 7. Calculate J5
 
-Since $a_5=d_5=0$, frames 4 and 5 have the same origin, so
-${}^0\mathbf{p}_5$ is already known. The J6 offset is $d_6=0.12$ along the
-local $Z$ axis of frame 5. Express the directed vector from P5 to P6 in frame
-4 and normalize it:
+With the upstream orientation $R_0^4$ and desired end-effector orientation
+$R_0^6$, form the relative wrist rotation
 
 $$
-\mathbf{u}_5=(R_0^4)^T
-\frac{{}^0\mathbf{p}_6-{}^0\mathbf{p}_5}{d_6}.
+R_4^6=(R_0^4)^T R_0^6
+=R_z(\theta_5)R_x(-\pi/2)R_z(\theta_6).
 $$
 
-For $\alpha_5=-\pi/2$, standard DH gives
-$\mathbf{u}_5=[-\sin\theta_5,\ \cos\theta_5,\ 0]^T$, hence
+Its third column is $[-\sin\theta_5,\cos\theta_5,0]^T$, so
 
 $$
-θ_5=\operatorname{atan2}(-u_{5x},u_{5y})
+	heta_5=\operatorname{atan2}(-(R_4^6)_{13},(R_4^6)_{23})
 \pmod{2\pi}.
 $$
 
-Check that $\|{}^0\mathbf{p}_6-{}^0\mathbf{p}_5\|=d_6$ and $u_{5z}=0$
-within numerical tolerance.
+Check that $(R_4^6)_{33}=0$ within numerical tolerance. Unlike the earlier
+$d_6$-offset configuration, the current $d_6=0$ means P5-to-P6 position alone
+does not determine $\theta_5$; use the target orientation.
 
 ### 8. Calculate J6
 
-The angle $\theta_6$ does not affect the position of P6 because this joint has
-$a_6=0$ and its fixed offset $d_6$ lies along frame 5's $Z$ axis. Therefore,
-P6 and the upstream joint angles alone cannot determine $\theta_6$; the desired
-end-effector orientation $R_0^6$ is also required.
+The current configuration has $a_6=0.12$ and $d_6=0$, so $\theta_6$ rotates
+the J6 offset within the frame-5 XY plane and does affect P6. The target
+orientation also constrains it and provides a consistency check.
 
 Once $\theta_1$ through $\theta_5$ are known, calculate the orientation of
 frame 5:
@@ -310,13 +306,21 @@ $$
 R_5^6=(R_0^5)^T R_0^6.
 $$
 
-Since $\alpha_6=0$, its DH rotation is simply $R_5^6=R_z(\theta_6)$, giving
+Since $\alpha_6=0$, $R_5^6=R_z(\theta_6)$, giving
 
 $$
 θ_6=\operatorname{atan2}\left((R_5^6)_{21},(R_5^6)_{11}\right)
 \pmod{2\pi}.
 $$
 
+The position must also satisfy
+
+$$
+{}^0\mathbf{p}_6={}^0\mathbf{p}_5+a_6R_0^6
+\begin{bmatrix}1\\0\\0\end{bmatrix},
+\qquad a_6=0.12.
+$$
+
 Here matrix indices are 1-based. For a valid target, $R_5^6$ should have the
-form $R_z(\theta_6)$ (up to numerical tolerance); deviations indicate an
-inconsistent target orientation or an incorrect upstream branch.
+form $R_z(\theta_6)$ and the position equation should hold within numerical
+tolerance; deviations indicate an inconsistent target or upstream branch.
