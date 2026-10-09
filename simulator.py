@@ -18,7 +18,7 @@ from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from stl import mesh as stl_mesh
 
-from kinematics import DHParameters, forward_kinematics, frame_origin
+from kinematics import DHParameters, compose_dh_parameters, forward_kinematics, frame_origin
 
 DEFAULT_DH_VALUES = (
 	(0.0, 0.30, 0.0, 90.0),
@@ -30,6 +30,21 @@ DEFAULT_DH_VALUES = (
 )
 MESH_FRAME_NAMES = ("Base", "J1", "J2", "J3", "J4", "J5", "J6")
 MESH_COLORS = ("#536d7a", "#d94a45", "#31845b", "#3978c5", "#d18b2c", "#7655a5", "#278b8b")
+
+
+def _rotation_to_rpy_degrees(transform: tuple[tuple[float, ...], ...]) -> tuple[float, float, float]:
+	"""Extract roll, pitch, yaw for R = Rz(yaw) Ry(pitch) Rx(roll)."""
+	r00, r01 = transform[0][0], transform[0][1]
+	r10, r11 = transform[1][0], transform[1][1]
+	r20, r21, r22 = transform[2][0], transform[2][1], transform[2][2]
+	pitch = math.atan2(-r20, math.hypot(r00, r10))
+	if math.hypot(r00, r10) > 1e-9:
+		roll = math.atan2(r21, r22)
+		yaw = math.atan2(r10, r00)
+	else:
+		roll = 0.0
+		yaw = math.atan2(-r01, r11)
+	return tuple(math.degrees(angle) for angle in (roll, pitch, yaw))
 
 
 @dataclass(frozen=True)
@@ -111,24 +126,31 @@ class RobotArmSimulator:
 			self.dh_tab,
 			text="Denavit–Hartenberg parameters",
 			font=("Segoe UI", 16, "bold"),
-		).grid(row=0, column=0, columnspan=5, sticky=tk.W, pady=(0, 6))
+		).grid(row=0, column=0, columnspan=6, sticky=tk.W, pady=(0, 6))
 		tk.Label(
 			self.dh_tab,
-			text="Angles are in degrees. Use consistent units for d and a.",
-		).grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(0, 18))
+			text="Theta offset and joint angle are in degrees; d and a use consistent length units.",
+		).grid(row=1, column=0, columnspan=6, sticky=tk.W, pady=(0, 18))
 
-		for column, heading in enumerate(("Joint", "Theta (deg)", "d", "a", "Alpha (deg)")):
+		for column, heading in enumerate((
+			"Joint", "Theta offset (deg)", "Joint angle (deg)", "d", "a", "Alpha (deg)"
+		)):
 			ttk.Label(self.dh_tab, text=heading, font=("Segoe UI", 10, "bold")).grid(
 				row=2, column=column, sticky=tk.W, padx=(0, 12), pady=(0, 8)
 			)
 
 		self.parameter_entries: list[tuple[ttk.Entry, ...]] = []
+		self.joint_angle_entries: list[ttk.Spinbox] = []
 		for joint_index, values in enumerate(DEFAULT_DH_VALUES, start=1):
 			ttk.Label(self.dh_tab, text=f"J{joint_index}").grid(
 				row=joint_index + 2, column=0, sticky=tk.W, padx=(0, 12), pady=4
 			)
+			angle_entry = ttk.Spinbox(self.dh_tab, from_=-360.0, to=360.0, increment=1.0, width=16)
+			angle_entry.insert(0, "0")
+			angle_entry.grid(row=joint_index + 2, column=2, sticky=tk.W, padx=(0, 12), pady=4)
+			self.joint_angle_entries.append(angle_entry)
 			entries = []
-			for column, value in enumerate(values, start=1):
+			for column, value in zip((1, 3, 4, 5), values):
 				entry = ttk.Entry(self.dh_tab, width=16)
 				entry.grid(row=joint_index + 2, column=column, sticky=tk.W, padx=(0, 12), pady=4)
 				entry.insert(0, self._format_value(value))
@@ -136,7 +158,7 @@ class RobotArmSimulator:
 			self.parameter_entries.append(tuple(entries))
 
 		button_row = ttk.Frame(self.dh_tab)
-		button_row.grid(row=10, column=0, columnspan=5, sticky=tk.W, pady=(18, 8))
+		button_row.grid(row=10, column=0, columnspan=6, sticky=tk.W, pady=(18, 8))
 		ttk.Button(button_row, text="Apply to View", command=self._apply_from_entries).pack(
 			side=tk.LEFT, padx=(0, 8)
 		)
@@ -144,8 +166,8 @@ class RobotArmSimulator:
 			side=tk.LEFT, padx=(0, 8)
 		)
 		ttk.Button(button_row, text="Load JSON", command=self._load_json).pack(side=tk.LEFT)
-		ttk.Label(self.dh_tab, text=f"File: {self.config_path.name}").grid(
-			row=11, column=0, columnspan=5, sticky=tk.W, pady=(4, 0)
+		ttk.Label(self.dh_tab, text=f"File: {self.config_path.name} · Joint angles start at zero and are not saved.").grid(
+			row=11, column=0, columnspan=6, sticky=tk.W, pady=(4, 0)
 		)
 		self._build_mesh_tab()
 
@@ -236,11 +258,9 @@ class RobotArmSimulator:
 	@staticmethod
 	def _to_dh_parameters(
 		values: tuple[tuple[float, float, float, float], ...],
+		joint_angles_degrees: tuple[float, ...] | None = None,
 	) -> tuple[DHParameters, ...]:
-		return tuple(
-			DHParameters(math.radians(theta), d, a, math.radians(alpha))
-			for theta, d, a, alpha in values
-		)
+		return compose_dh_parameters(values, joint_angles_degrees)
 
 	def _read_entry_values(self) -> tuple[tuple[float, float, float, float], ...]:
 		rows = tuple(tuple(float(entry.get()) for entry in row) for row in self.parameter_entries)
@@ -251,7 +271,15 @@ class RobotArmSimulator:
 		return rows
 
 	def _read_entry_parameters(self) -> tuple[DHParameters, ...]:
-		return self._to_dh_parameters(self._read_entry_values())
+		return self._to_dh_parameters(self._read_entry_values(), self._read_joint_angle_values())
+
+	def _read_joint_angle_values(self) -> tuple[float, ...]:
+		joint_angles = tuple(float(entry.get()) for entry in self.joint_angle_entries)
+		if len(joint_angles) != 6:
+			raise ValueError("Exactly six runtime joint angles are required.")
+		if not all(math.isfinite(value) for value in joint_angles):
+			raise ValueError("All runtime joint angles must be finite numbers.")
+		return joint_angles
 
 	def _read_mesh_entries(self) -> tuple[MeshSetting, ...]:
 		settings = []
@@ -313,7 +341,7 @@ class RobotArmSimulator:
 			"units": {"angles": "degrees", "lengths": "model_units"},
 			"show_mesh_edges": self.show_mesh_edges.get(),
 			"joints": [
-				{"theta_deg": theta, "d": d, "a": a, "alpha_deg": alpha}
+				{"theta_offset_deg": theta, "d": d, "a": a, "alpha_deg": alpha}
 				for theta, d, a, alpha in values
 			],
 			"meshes": [self._serialize_mesh_setting(setting) for setting in mesh_settings],
@@ -323,7 +351,7 @@ class RobotArmSimulator:
 		except OSError as error:
 			messagebox.showerror("Could not save parameters", str(error), parent=self.root)
 			return
-		self.parameters = self._to_dh_parameters(values)
+		self.parameters = self._to_dh_parameters(values, self._read_joint_angle_values())
 		self.mesh_settings = mesh_settings
 		self._render_scene()
 		messagebox.showinfo("Parameters saved", f"Saved to {self.config_path.name}.", parent=self.root)
@@ -359,7 +387,7 @@ class RobotArmSimulator:
 			raise ValueError("Parameter file must contain exactly six joints.")
 		dh_values = tuple(
 			(
-				float(joint["theta_deg"]),
+				float(joint.get("theta_offset_deg", joint.get("theta_deg"))),
 				float(joint["d"]),
 				float(joint["a"]),
 				float(joint["alpha_deg"]),
@@ -416,7 +444,7 @@ class RobotArmSimulator:
 			return
 		self._populate_dh_entries(values)
 		self._populate_mesh_entries(mesh_settings)
-		self.parameters = self._to_dh_parameters(values)
+		self.parameters = self._to_dh_parameters(values, self._read_joint_angle_values())
 		self.mesh_settings = mesh_settings
 		self.show_mesh_edges.set(show_mesh_edges)
 		self._render_scene()
@@ -510,9 +538,15 @@ class RobotArmSimulator:
 			loaded_count = sum(bool(setting.path) and setting.opacity > 0 for setting in self.mesh_settings)
 			self.mesh_status.configure(text=f"{loaded_count} mesh(es) configured.")
 		self.canvas.draw_idle()
-		tool_position = frame_origins[-1]
+		tool_transform = transforms[-1]
+		tool_position = frame_origin(tool_transform)
+		roll, pitch, yaw = _rotation_to_rpy_degrees(tool_transform)
 		self.pose_label.configure(
-			text=f"Frame 6 origin: X {tool_position[0]:.3f}   Y {tool_position[1]:.3f}   Z {tool_position[2]:.3f}"
+			text=(
+				f"T6 position: X {tool_position[0]:.3f}   Y {tool_position[1]:.3f}   "
+				f"Z {tool_position[2]:.3f}\n"
+				f"Orientation RPY (ZYX, deg): roll {roll:.1f}   pitch {pitch:.1f}   yaw {yaw:.1f}"
+			)
 		)
 
 	@staticmethod

@@ -17,7 +17,12 @@ The **3D View** tab displays the base and all six joint frames. Drag with the
 left mouse button to orbit, drag with the right mouse button to pan, and use the
 scroll wheel to zoom. The **Parameters** tab contains separate **DH Parameters**
 and **Meshes** tabs. DH values are editable per joint; angles are entered in
-degrees, while `d`, `a`, and mesh offsets use consistent model units. Each mesh
+degrees, while `d`, `a`, and mesh offsets use consistent model units. The DH
+table separates each joint's static theta offset from its runtime joint angle.
+Runtime angles start at zero each time the application launches; **Apply to
+View** uses offset plus runtime angle for forward kinematics. Saving stores only
+the static theta offset and link dimensions, never the runtime joint position.
+Older configuration files using `theta_deg` are read as static offsets. Each mesh
 can have a local XYZ offset and local X/Y/Z Euler rotations applied in that
 order, in degrees. Opacity ranges from 0 (transparent) to 1 (opaque). Use
 **Show triangle edges** in the Meshes tab to toggle mesh outlines; it is off by
@@ -36,3 +41,7 @@ multiplying these joint by joint, yields each joint location
 2) add math functions to calculate joint transformations according to mathematics.md, for each joint draw a xyz marker. make the joint parameter settings changeable in different tab of UI, save the parameters as json
 
 3) under parameters, add option to load STL file mesh for base and each of 6 joints. The meshes need location offset from the zero marker, and there needs to be opacity option for meshes. Save all the mesh parameters in json.
+
+4) on the front tab, there should be current T6 display, to show the end effector position and orientation.
+
+5) The DH theta parameter is split into a static offset and a runtime joint angle. Only the static offset is stored in JSON; the runtime angle starts at zero whenever the application launches.

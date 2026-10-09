@@ -79,6 +79,41 @@ def frame_origin(transform: Matrix4) -> tuple[float, float, float]:
 	return (transform[0][3], transform[1][3], transform[2][3])
 
 
+def compose_dh_parameters(
+	static_values: Sequence[tuple[float, float, float, float]],
+	joint_angles_degrees: Sequence[float] | None = None,
+) -> tuple[DHParameters, ...]:
+	"""Build DH rows from degree offsets and live joint angles.
+
+	Each static row is ``(theta_offset_deg, d, a, alpha_deg)``. Runtime joint
+	angles are in degrees and default to zero; they are added to the stored theta
+	offset and are not part of the static rows.
+	"""
+	if len(static_values) != 6:
+		raise ValueError(f"Expected static DH values for 6 joints, got {len(static_values)}")
+	if joint_angles_degrees is None:
+		joint_angles_degrees = (0.0,) * 6
+	if len(joint_angles_degrees) != 6:
+		raise ValueError(f"Expected runtime angles for 6 joints, got {len(joint_angles_degrees)}")
+
+	parameters = []
+	for row, joint_angle in zip(static_values, joint_angles_degrees):
+		if len(row) != 4:
+			raise ValueError("Each static DH row must contain theta offset, d, a, and alpha")
+		if not all(math.isfinite(value) for value in (*row, joint_angle)):
+			raise ValueError("Static DH values and runtime joint angles must be finite")
+		theta_offset, d, a, alpha = row
+		parameters.append(
+			DHParameters(
+				theta=math.radians(theta_offset + joint_angle),
+				d=d,
+				a=a,
+				alpha=math.radians(alpha),
+			)
+		)
+	return tuple(parameters)
+
+
 def _rotation(transform: Matrix4) -> tuple[tuple[float, float, float], ...]:
 	return tuple(tuple(transform[row][column] for column in range(3)) for row in range(3))
 
@@ -141,8 +176,9 @@ def inverse_kinematics(
 
 	The supported DH geometry has two J1 plane branches and two planar elbow
 	branches. Joints 3 and 4 are coaxial, so ``preferred_theta3`` selects one
-	valid split of their observable sum. Angles are radians; unreachable or
-	pose-inconsistent targets return an empty tuple.
+	valid split of their observable sum. ``geometry`` theta values are static
+	DH offsets; returned angles are variable joint angles in radians. Unreachable
+	or pose-inconsistent targets return an empty tuple.
 	"""
 	_validate_supported_geometry(geometry, tolerance)
 	if not math.isfinite(preferred_theta3) or not math.isfinite(tolerance) or tolerance <= 0:
@@ -175,7 +211,9 @@ def inverse_kinematics(
 	solutions: list[InverseKinematicsSolution] = []
 
 	for shoulder_branch in (1, -1):
-		theta1 = math.atan2(shoulder_branch * wrist_center[1], shoulder_branch * wrist_center[0])
+		total_theta1 = math.atan2(
+			shoulder_branch * wrist_center[1], shoulder_branch * wrist_center[0]
+		)
 		radial_target = shoulder_branch * base_radius - a1
 		distance = math.hypot(radial_target, wrist_height)
 		cosine = (distance * distance - link_one * link_one - link_two * link_two) / (
@@ -187,23 +225,44 @@ def inverse_kinematics(
 
 		for elbow_branch in (1, -1):
 			psi = elbow_branch * math.acos(cosine)
-			theta2 = math.atan2(wrist_height, radial_target) - math.atan2(
+			total_theta2 = math.atan2(wrist_height, radial_target) - math.atan2(
 				link_two * math.sin(psi), link_one + link_two * math.cos(psi)
 			)
 			theta3 = preferred_theta3
-			theta4 = _wrap_angle(psi - theta3)
+			total_theta3 = geometry[2].theta + theta3
+			theta4 = _wrap_angle(psi - total_theta3 - geometry[3].theta)
 			partial = tuple(
-				replace(joint, theta=angle)
-				for joint, angle in zip(geometry, (theta1, theta2, theta3, theta4, 0.0, 0.0))
+				replace(joint, theta=joint.theta + angle)
+				for joint, angle in zip(
+					geometry,
+					(
+						total_theta1 - geometry[0].theta,
+						total_theta2 - geometry[1].theta,
+						theta3,
+						theta4,
+						-geometry[4].theta,
+						-geometry[5].theta,
+					),
+				)
 			)
 			frame_four = forward_kinematics(partial)[3]
 			rotation_four = _rotation(frame_four)
 			relative_rotation = _multiply3(_transpose3(rotation_four), target_rotation)
 			theta5 = math.atan2(-relative_rotation[0][2], relative_rotation[1][2])
 			theta6 = math.atan2(-relative_rotation[2][0], -relative_rotation[2][1])
-			angles = (theta1, theta2, theta3, theta4, theta5, theta6)
+			angles = (
+				total_theta1 - geometry[0].theta,
+				total_theta2 - geometry[1].theta,
+				theta3,
+				theta4,
+				theta5 - geometry[4].theta,
+				theta6 - geometry[5].theta,
+			)
 			reconstructed = forward_kinematics(
-				tuple(replace(joint, theta=angle) for joint, angle in zip(geometry, angles))
+				tuple(
+					replace(joint, theta=joint.theta + angle)
+					for joint, angle in zip(geometry, angles)
+				)
 			)[-1]
 			position_error = math.sqrt(
 				sum((reconstructed[row][3] - target_position[row]) ** 2 for row in range(3))

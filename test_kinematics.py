@@ -9,7 +9,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from kinematics import DHParameters, forward_kinematics, inverse_kinematics
+from kinematics import DHParameters, compose_dh_parameters, forward_kinematics, inverse_kinematics
 
 
 def configured_geometry() -> tuple[DHParameters, ...]:
@@ -17,7 +17,7 @@ def configured_geometry() -> tuple[DHParameters, ...]:
 	configuration = json.loads(configuration_path.read_text(encoding="utf-8"))
 	return tuple(
 		DHParameters(
-			theta=0.0,
+			theta=math.radians(float(joint.get("theta_offset_deg", joint.get("theta_deg", 0.0)))),
 			d=float(joint["d"]),
 			a=float(joint["a"]),
 			alpha=math.radians(float(joint["alpha_deg"])),
@@ -29,7 +29,7 @@ def configured_geometry() -> tuple[DHParameters, ...]:
 def parameters_at_angles(
 	geometry: tuple[DHParameters, ...], angles: tuple[float, ...]
 ) -> tuple[DHParameters, ...]:
-	return tuple(replace(joint, theta=angle) for joint, angle in zip(geometry, angles))
+	return tuple(replace(joint, theta=joint.theta + angle) for joint, angle in zip(geometry, angles))
 
 
 def angle_error(first: float, second: float) -> float:
@@ -40,6 +40,48 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls) -> None:
 		cls.geometry = configured_geometry()
+
+	def test_static_theta_offsets_compose_with_runtime_angles(self) -> None:
+		static_values = (
+			(12.0, 0.3, 0.1, 90.0),
+			(-25.0, 0.0, 0.4, 0.0),
+			(5.0, 0.0, 0.0, 0.0),
+			(0.0, 0.0, 0.3, 90.0),
+			(0.0, 0.0, 0.0, -90.0),
+			(0.0, 0.0, 0.12, 0.0),
+		)
+		startup_parameters = compose_dh_parameters(static_values)
+		self.assertAlmostEqual(startup_parameters[0].theta, math.radians(12.0))
+		self.assertAlmostEqual(startup_parameters[1].theta, math.radians(-25.0))
+
+		joint_angles = (30.0, 10.0, -15.0, 0.0, 5.0, -20.0)
+		moving_parameters = compose_dh_parameters(static_values, joint_angles)
+		for parameters, static_row, variable_angle in zip(moving_parameters, static_values, joint_angles):
+			self.assertAlmostEqual(parameters.theta, math.radians(static_row[0] + variable_angle))
+			self.assertEqual((parameters.d, parameters.a), (static_row[1], static_row[2]))
+
+	def test_configuration_persists_offsets_not_runtime_angles(self) -> None:
+		configuration = json.loads(
+			Path(__file__).with_name("robot_parameters.json").read_text(encoding="utf-8")
+		)
+		for joint in configuration["joints"]:
+			self.assertIn("theta_offset_deg", joint)
+			self.assertNotIn("theta_deg", joint)
+			self.assertNotIn("joint_angle_deg", joint)
+
+		startup_parameters = compose_dh_parameters(
+			tuple(
+				(
+					float(joint["theta_offset_deg"]),
+					float(joint["d"]),
+					float(joint["a"]),
+					float(joint["alpha_deg"]),
+				)
+				for joint in configuration["joints"]
+			)
+		)
+		for parameters, joint in zip(startup_parameters, configuration["joints"]):
+			self.assertAlmostEqual(parameters.theta, math.radians(joint["theta_offset_deg"]))
 
 	def test_random_fk_poses_recover_angles_and_branch_labels(self) -> None:
 		random_source = random.Random(20261009)
@@ -55,11 +97,13 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 				for axis in range(3)
 			)
 			projected_radius = (
-				frame_five_position[0] * math.cos(angles[0])
-				+ frame_five_position[1] * math.sin(angles[0])
+				frame_five_position[0] * math.cos(self.geometry[0].theta + angles[0])
+				+ frame_five_position[1] * math.sin(self.geometry[0].theta + angles[0])
 			)
 			expected_shoulder_branch = 1 if projected_radius >= 0 else -1
-			combined_elbow_angle = angle_error(angles[2] + angles[3], 0.0)
+			combined_elbow_angle = angle_error(
+				self.geometry[2].theta + angles[2] + self.geometry[3].theta + angles[3], 0.0
+			)
 			expected_elbow_branch = 1 if math.sin(combined_elbow_angle) >= 0 else -1
 
 			solutions = inverse_kinematics(
