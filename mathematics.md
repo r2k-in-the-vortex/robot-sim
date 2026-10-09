@@ -172,3 +172,47 @@ $$
 So the 2D target for the remaining planar solve is $(\rho,\ z_5-0.3)$ in
 radial-height coordinates measured from J1. The rotated point in base
 coordinates, before subtracting J1, is $(\rho,0,z_5)$.
+
+### 3. Calculate J3 angle
+
+For this robot, $a_3=0$, so the planar triangle has link lengths
+$L_2=a_2=0.4$ and $L_4=a_4=0.3$. Let the 2D target relative to J1 be
+$(\rho,h)$, where $h=z_5-d_1$ as above, and let
+
+$$
+D=\sqrt{\rho^2+h^2}
+$$
+
+be the distance from $P_1$ to $P_5$. By the law of cosines, the interior angle
+$\gamma$ at $P_2$ is
+
+$$
+\gamma=\cos^{-1}\left(\frac{L_2^2+L_4^2-D^2}{2L_2L_4}\right).
+$$
+
+When the two links are straight and point in the same direction, $\gamma=\pi$
+and the relative joint rotation is zero. The two elbow branches for the relative
+orientation of the second link are therefore
+
+$$
+\delta_+ = \pi-\gamma,
+\qquad
+\delta_- = \gamma-\pi,
+\qquad
+\delta = \theta_3+\theta_4 \pmod{2\pi}.
+$$
+
+Thus, if $\theta_4$ is known or constrained, the two J3 candidates are
+
+$$
+θ_{3,+}=\pi-\gamma-θ_4,
+\qquad
+θ_{3,-}=\gamma-\pi-θ_4
+\pmod{2\pi}.
+$$
+
+If $\theta_4=0$, these reduce to $\theta_3=\pi-\gamma$ or
+$\theta_3=\gamma-\pi$. Without a known $\theta_4$ or an end-effector
+orientation constraint, position alone determines $\theta_3+\theta_4$, not
+$\theta_3$ separately. A real-valued triangle solution also requires
+$|L_2-L_4|\le D\le L_2+L_4$.
