@@ -125,3 +125,50 @@ $$
 $$
 
 Here $[r_{13},r_{23},r_{33}]^T$ is the end-effector's local $Z$ axis expressed in base coordinates (the third column of $R_0^6$). Thus the end-effector position alone determines J6, but finding J5 also requires the desired end-effector orientation, or at least its $Z$-axis direction.
+
+### 2. Find the J1 angle and reduce to a plane
+
+The J1 axis lies on base $Z$, so its origin $P_1$ has $x_1=y_1=0$. The
+points $P_1$ through $P_5$ lie in the vertical plane selected by $\theta_1$.
+The azimuth of $P_5$ around base $Z$ gives the angle of that plane:
+
+$$
+	heta_1 = \operatorname{atan2}(y_5-y_1,\ x_5-x_1)
+= \operatorname{atan2}(y_5,\ x_5).
+$$
+
+Here $\operatorname{atan2}(y,x)$ returns the quadrant-correct angle, typically
+in $(-\pi,\pi]$. This expression uses a nonnegative planar radius
+$\rho=\sqrt{x_5^2+y_5^2}$. If the planar solution instead uses a signed radius,
+the equivalent representation $\theta_1+\pi$ with radius $-\rho$ must also be
+considered. Once the branch is chosen, rotate the target and arm geometry by
+$-\theta_1$ about base $Z$; the remaining positions then lie in a 2D plane for
+solving the other joint angles.
+
+Thus the first joint angle is
+
+$$
+	heta_1 = \operatorname{atan2}(y_5,\ x_5).
+$$
+
+Rotate $P_5$ by $-\theta_1$ about base $Z$ to align the arm's plane with the
+base $XZ$ plane. Since $P_1=(0,0,d_1)$ and this robot has $d_1=0.3$, the
+resulting coordinates relative to J1 are
+
+$$
+{}^1\mathbf{p}_{5,\mathrm{plane}}
+= R_z(-\theta_1)\left({}^0\mathbf{p}_5-{}^0\mathbf{p}_1\right)
+= \begin{bmatrix}
+\cos\theta_1 & \sin\theta_1 & 0 \\
+-\sin\theta_1 & \cos\theta_1 & 0 \\
+0 & 0 & 1
+\end{bmatrix}
+\begin{bmatrix}x_5\\y_5\\z_5-0.3\end{bmatrix}
+= \begin{bmatrix}\rho\\0\\z_5-0.3\end{bmatrix},
+\qquad
+\rho=\sqrt{x_5^2+y_5^2}.
+$$
+
+So the 2D target for the remaining planar solve is $(\rho,\ z_5-0.3)$ in
+radial-height coordinates measured from J1. The rotated point in base
+coordinates, before subtracting J1, is $(\rho,0,z_5)$.
