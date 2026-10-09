@@ -45,3 +45,12 @@ multiplying these joint by joint, yields each joint location
 4) on the front tab, there should be current T6 display, to show the end effector position and orientation.
 
 5) The DH theta parameter is split into a static offset and a runtime joint angle. Only the static offset is stored in JSON; the runtime angle starts at zero whenever the application launches.
+
+6) The 3D View includes Cartesian jog controls for base-frame X, Y, and Z. Set
+the step length in model units and choose a positive or negative axis button.
+Each jog offsets the current T6 position, keeps its orientation fixed, solves
+the new pose with inverse kinematics, and applies the closest valid joint
+solution. An unreachable step leaves the robot at its current pose.
+
+6) The front display has controls to jog the robot in X, Y, Z directions by a given step length.
+The mechanism of that is that the step offset from current T6 is used to calculate new T6', which is fed into inverse kinematics to calculate new joint angles, which are used to update the robot position

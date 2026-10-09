@@ -8,14 +8,14 @@
   "joints": [
     {
       "theta_offset_deg": 0.0,
-      "d": 0.3,
-      "a": 0.1,
+      "d": 30.0,
+      "a": 10.0,
       "alpha_deg": 90.0
     },
     {
       "theta_offset_deg": 90.0,
       "d": 0.0,
-      "a": 0.4,
+      "a": 40.0,
       "alpha_deg": 0.0
     },
     {
@@ -27,7 +27,7 @@
     {
       "theta_offset_deg": 0.0,
       "d": 0.0,
-      "a": 0.3,
+      "a": 30.0,
       "alpha_deg": 90.0
     },
     {
@@ -39,7 +39,7 @@
     {
       "theta_offset_deg": 0.0,
       "d": 0.0,
-      "a": 0.12,
+      "a": 12.0,
       "alpha_deg": 0.0
     }
   ],

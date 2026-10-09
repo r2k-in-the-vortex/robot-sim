@@ -18,7 +18,13 @@ from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from stl import mesh as stl_mesh
 
-from kinematics import DHParameters, compose_dh_parameters, forward_kinematics, frame_origin
+from kinematics import (
+	DHParameters,
+	compose_dh_parameters,
+	forward_kinematics,
+	frame_origin,
+	inverse_kinematics,
+)
 
 DEFAULT_DH_VALUES = (
 	(0.0, 0.30, 0.0, 90.0),
@@ -45,6 +51,21 @@ def _rotation_to_rpy_degrees(transform: tuple[tuple[float, ...], ...]) -> tuple[
 		roll = 0.0
 		yaw = math.atan2(-r01, r11)
 	return tuple(math.degrees(angle) for angle in (roll, pitch, yaw))
+
+
+def offset_pose_translation(
+	pose: tuple[tuple[float, ...], ...], axis: int, distance: float
+) -> tuple[tuple[float, ...], ...]:
+	"""Return a pose translated along one base-frame axis, preserving orientation."""
+	if len(pose) != 4 or any(len(row) != 4 for row in pose):
+		raise ValueError("pose must be a 4x4 homogeneous transform")
+	if axis not in (0, 1, 2):
+		raise ValueError("axis must be 0 (X), 1 (Y), or 2 (Z)")
+	if not math.isfinite(distance):
+		raise ValueError("translation distance must be finite")
+	result = [list(row) for row in pose]
+	result[axis][3] += distance
+	return tuple(tuple(row) for row in result)
 
 
 @dataclass(frozen=True)
@@ -89,6 +110,7 @@ class RobotArmSimulator:
 		self.axes: Axes = self.figure.add_subplot(111, projection="3d")
 		self.canvas = FigureCanvasTkAgg(self.figure, master=self.view_tab)
 		self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+		self._build_cartesian_jog_controls()
 		self.pose_label = ttk.Label(self.view_tab, anchor=tk.W, padding=(4, 8))
 		self.pose_label.pack(fill=tk.X)
 		self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
@@ -113,6 +135,70 @@ class RobotArmSimulator:
 		canvas_widget.bind("<MouseWheel>", self._on_tk_mousewheel)
 		canvas_widget.bind("<Button-4>", self._on_tk_mousewheel)
 		canvas_widget.bind("<Button-5>", self._on_tk_mousewheel)
+
+	def _build_cartesian_jog_controls(self) -> None:
+		controls = ttk.Frame(self.view_tab, padding=(4, 6))
+		controls.pack(fill=tk.X)
+		ttk.Label(controls, text="Cartesian jog step").pack(side=tk.LEFT, padx=(0, 6))
+		self.jog_step_entry = ttk.Spinbox(
+			controls, from_=0.001, to=1_000_000.0, increment=0.01, width=9
+		)
+		self.jog_step_entry.insert(0, "0.01")
+		self.jog_step_entry.pack(side=tk.LEFT, padx=(0, 10))
+		for axis, name in enumerate(("X", "Y", "Z")):
+			for direction, suffix in ((-1, "-"), (1, "+")):
+				ttk.Button(
+					controls,
+					text=f"{name}{suffix}",
+					width=4,
+					command=lambda axis=axis, direction=direction: self._jog_cartesian(axis, direction),
+				).pack(side=tk.LEFT, padx=2)
+		self.jog_status_label = ttk.Label(controls, anchor=tk.W)
+		self.jog_status_label.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+
+	def _jog_cartesian(self, axis: int, direction: int) -> None:
+		try:
+			static_values = self._read_entry_values()
+			joint_angles_degrees = self._read_joint_angle_values()
+			step = float(self.jog_step_entry.get())
+			if not math.isfinite(step) or step <= 0:
+				raise ValueError("Jog step must be a finite positive length.")
+			geometry = self._to_dh_parameters(static_values)
+			current_parameters = self._to_dh_parameters(static_values, joint_angles_degrees)
+		except ValueError as error:
+			self.jog_status_label.configure(text=str(error))
+			return
+
+		current_pose = forward_kinematics(current_parameters)[-1]
+		target_pose = offset_pose_translation(current_pose, axis, direction * step)
+		solutions = inverse_kinematics(
+			target_pose,
+			geometry,
+			preferred_theta3=math.radians(joint_angles_degrees[2]),
+		)
+		if not solutions:
+			self.jog_status_label.configure(text="No reachable IK solution for that step.")
+			return
+
+		current_angles = tuple(math.radians(angle) for angle in joint_angles_degrees)
+		best_solution = min(
+			solutions,
+			key=lambda solution: sum(
+				math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
+				for candidate, current in zip(solution.angles, current_angles)
+			),
+		)
+		for entry, angle in zip(self.joint_angle_entries, best_solution.angles):
+			entry.delete(0, tk.END)
+			entry.insert(0, self._format_value(math.degrees(angle)))
+		self.parameters = self._to_dh_parameters(
+			static_values,
+			tuple(math.degrees(angle) for angle in best_solution.angles),
+		)
+		self._render_scene()
+		axis_name = "XYZ"[axis]
+		displacement = direction * step
+		self.jog_status_label.configure(text=f"Moved {axis_name} {displacement:+g}")
 
 	def _build_parameter_tab(self) -> None:
 		self.parameter_notebook = ttk.Notebook(self.parameters_tab)

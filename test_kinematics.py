@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from kinematics import DHParameters, compose_dh_parameters, forward_kinematics, inverse_kinematics
+from simulator import offset_pose_translation
 
 
 def configured_geometry() -> tuple[DHParameters, ...]:
@@ -152,6 +153,21 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		target_rotation_row[0] *= -1
 		target[0] = tuple(target_rotation_row)
 		self.assertEqual(inverse_kinematics(tuple(target), self.geometry), ())
+
+	def test_cartesian_jogs_preserve_orientation_and_remain_solvable(self) -> None:
+		current_pose = forward_kinematics(self.geometry)[-1]
+		step = 0.01
+		for axis in range(3):
+			for direction in (-1, 1):
+				target_pose = offset_pose_translation(current_pose, axis, direction * step)
+				for row in range(3):
+					for column in range(3):
+						self.assertEqual(target_pose[row][column], current_pose[row][column])
+					self.assertAlmostEqual(
+						target_pose[row][3] - current_pose[row][3],
+						direction * step if row == axis else 0.0,
+					)
+				self.assertTrue(inverse_kinematics(target_pose, self.geometry))
 
 
 if __name__ == "__main__":
