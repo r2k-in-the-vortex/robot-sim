@@ -306,15 +306,36 @@ $$
 $$
 
 Check that $\|{}^0\mathbf{p}_6-{}^0\mathbf{p}_5\|=d_6$ and $u_{5z}=0$
-within numerical tolerance. If the target pose also supplies $R_0^6$, the
-remaining wrist angle can be recovered from
+within numerical tolerance.
+
+### 8. Calculate J6
+
+The angle $\theta_6$ does not affect the position of P6 because this joint has
+$a_6=0$ and its fixed offset $d_6$ lies along frame 5's $Z$ axis. Therefore,
+P6 and the upstream joint angles alone cannot determine $\theta_6$; the desired
+end-effector orientation $R_0^6$ is also required.
+
+Once $\theta_1$ through $\theta_5$ are known, calculate the orientation of
+frame 5:
 
 $$
-R_4^6=(R_0^4)^T R_0^6,
-\qquad
-R_z(\theta_6)=R_x(\pi/2)R_z(-\theta_5)R_4^6,
+R_0^5=R_0^4R_z(\theta_5)R_x(\alpha_5),
+\qquad \alpha_5=-\frac{\pi}{2}.
 $$
 
-so $\theta_6=\operatorname{atan2}([R_z(\theta_6)]_{21},
-[R_z(\theta_6)]_{11})$. This also provides an orientation consistency check
-for the selected upstream and wrist branches.
+The relative orientation from frame 5 to frame 6 is
+
+$$
+R_5^6=(R_0^5)^T R_0^6.
+$$
+
+Since $\alpha_6=0$, its DH rotation is simply $R_5^6=R_z(\theta_6)$, giving
+
+$$
+θ_6=\operatorname{atan2}\left((R_5^6)_{21},(R_5^6)_{11}\right)
+\pmod{2\pi}.
+$$
+
+Here matrix indices are 1-based. For a valid target, $R_5^6$ should have the
+form $R_z(\theta_6)$ (up to numerical tolerance); deviations indicate an
+inconsistent target orientation or an incorrect upstream branch.
