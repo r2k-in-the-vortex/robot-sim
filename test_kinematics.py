@@ -78,6 +78,7 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		configuration = json.loads(
 			Path(__file__).with_name("robot_parameters.json").read_text(encoding="utf-8")
 		)
+		self.assertEqual(configuration["show_coordinate_gizmos"], [True] * 7)
 		for joint in configuration["joints"]:
 			self.assertIn("theta_offset_deg", joint)
 			self.assertNotIn("theta_deg", joint)
@@ -336,6 +337,28 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.assertTrue(app._apply_from_entries())
 			self.assertEqual(app.front_joint_angle_vars[2].get(), "-12.5°")
 			self.assertAlmostEqual(app.parameters[2].theta, self.geometry[2].theta + math.radians(-12.5))
+		finally:
+			app.root.destroy()
+
+	def test_tk_coordinate_gizmo_visibility_is_independent_per_frame(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			self.assertEqual(tuple(variable.get() for variable in app.coordinate_gizmo_vars), (True,) * 7)
+			self.assertTrue(app.show_joint_labels.get())
+			self.assertEqual(len(app.axes.texts), 7)
+			self.assertGreaterEqual(len(app.axes.lines), 20)
+			app.coordinate_gizmo_vars[3].set(False)
+			app._render_scene()
+			self.assertEqual(len(app.axes.texts), 7)
+			self.assertEqual(app.coordinate_gizmo_vars[0].get(), True)
+			self.assertEqual(app.coordinate_gizmo_vars[3].get(), False)
+			app.show_joint_labels.set(False)
+			app._render_scene()
+			self.assertEqual(len(app.axes.texts), 0)
 		finally:
 			app.root.destroy()
 

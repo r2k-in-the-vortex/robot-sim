@@ -123,6 +123,8 @@ class RobotArmSimulator:
 		self.parameters = self._to_dh_parameters(DEFAULT_DH_VALUES)
 		self.mesh_settings = self._default_mesh_settings()
 		self.show_mesh_edges = tk.BooleanVar(master=self.root, value=False)
+		self.show_joint_labels = tk.BooleanVar(master=self.root, value=True)
+		self.coordinate_gizmo_vars = [tk.BooleanVar(master=self.root, value=True) for _ in MESH_FRAME_NAMES]
 
 		self.notebook = ttk.Notebook(self.root)
 		self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -134,25 +136,27 @@ class RobotArmSimulator:
 		self.figure = Figure(figsize=(8, 6), facecolor="#f4f6f7")
 		self.axes: Axes = self.figure.add_subplot(111, projection="3d")
 		self.canvas = FigureCanvasTkAgg(self.figure, master=self.view_tab)
-		self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 		self._build_cartesian_jog_controls()
-		self._build_joint_jog_controls()
 		pose_row = ttk.Frame(self.view_tab)
 		pose_row.pack(fill=tk.X)
-		self.pose_label = ttk.Label(pose_row, anchor=tk.W, padding=(4, 8))
+		self.pose_label = ttk.Label(pose_row, anchor=tk.W, padding=(4, 4))
 		self.pose_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 		ttk.Button(pose_row, text="Copy XYZ", command=self._copy_t6_position).pack(
 			side=tk.RIGHT, padx=(8, 4)
 		)
+		self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 		self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
 		self._build_parameter_tab()
 		if self.config_path.exists():
 			try:
-				dh_values, mesh_settings, show_mesh_edges = self._read_json_configuration()
+				dh_values, mesh_settings, show_mesh_edges, gizmo_visibility, show_joint_labels = self._read_json_configuration()
 				self._populate_dh_entries(dh_values)
 				self._populate_mesh_entries(mesh_settings)
 				self.show_mesh_edges.set(show_mesh_edges)
+				for variable, visible in zip(self.coordinate_gizmo_vars, gizmo_visibility):
+					variable.set(visible)
+				self.show_joint_labels.set(show_joint_labels)
 			except (OSError, ValueError, TypeError, KeyError) as error:
 				messagebox.showerror("Parameter file error", str(error), parent=self.root)
 		self.parameters = self._read_entry_parameters()
@@ -168,41 +172,55 @@ class RobotArmSimulator:
 		canvas_widget.bind("<Button-5>", self._on_tk_mousewheel)
 
 	def _build_cartesian_jog_controls(self) -> None:
-		controls = ttk.Frame(self.view_tab, padding=(4, 6))
+		controls = ttk.Frame(self.view_tab, padding=(4, 1))
 		controls.pack(fill=tk.X)
-		ttk.Label(controls, text="Cartesian jog step").pack(side=tk.LEFT, padx=(0, 6))
-		self.jog_step_entry = ttk.Spinbox(
-			controls, from_=0.001, to=1_000_000.0, increment=0.01, width=9
-		)
+		self.jog_step_entry = ttk.Spinbox(controls, from_=0.001, to=1_000_000.0, increment=0.01, width=6)
 		self.jog_step_entry.insert(0, "1")
-		self.jog_step_entry.pack(side=tk.LEFT, padx=(0, 10))
+		self.jog_step_entry.grid(row=0, column=1, padx=(2, 5))
+		ttk.Label(controls, text="XYZ").grid(row=0, column=0, sticky=tk.W)
 		for axis, name in enumerate(("X", "Y", "Z")):
 			for direction, suffix in ((-1, "-"), (1, "+")):
+				column = 2 + axis * 2 + (1 if direction > 0 else 0)
 				ttk.Button(
-					controls,
-					text=f"{name}{suffix}",
-					width=4,
+					controls, text=f"{name}{suffix}", width=3,
 					command=lambda axis=axis, direction=direction: self._jog_cartesian(axis, direction),
-				).pack(side=tk.LEFT, padx=2)
-		self.jog_status_label = ttk.Label(controls, anchor=tk.W)
-		self.jog_status_label.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+				).grid(row=0, column=column, padx=1, pady=1)
 
-		rotation_controls = ttk.Frame(self.view_tab, padding=(4, 2, 4, 6))
-		rotation_controls.pack(fill=tk.X)
-		ttk.Label(rotation_controls, text="World rotation step (deg)").pack(side=tk.LEFT, padx=(0, 6))
-		self.rotation_step_entry = ttk.Spinbox(
-			rotation_controls, from_=0.1, to=360.0, increment=1.0, width=9
-		)
+		ttk.Label(controls, text="Rot deg").grid(row=1, column=0, sticky=tk.W)
+		self.rotation_step_entry = ttk.Spinbox(controls, from_=0.1, to=360.0, increment=1.0, width=6)
 		self.rotation_step_entry.insert(0, "5")
-		self.rotation_step_entry.pack(side=tk.LEFT, padx=(0, 10))
+		self.rotation_step_entry.grid(row=1, column=1, padx=(2, 5))
 		for axis, name in enumerate(("X", "Y", "Z")):
 			for direction, suffix in ((-1, "-"), (1, "+")):
+				column = 2 + axis * 2 + (1 if direction > 0 else 0)
 				ttk.Button(
-					rotation_controls,
-					text=f"R{name}{suffix}",
-					width=5,
+					controls, text=f"R{name}{suffix}", width=4,
 					command=lambda axis=axis, direction=direction: self._jog_rotation_world(axis, direction),
-				).pack(side=tk.LEFT, padx=2)
+				).grid(row=1, column=column, padx=1, pady=1)
+
+		ttk.Label(controls, text="J step").grid(row=2, column=0, sticky=tk.W)
+		self.joint_step_entry = ttk.Spinbox(controls, from_=0.1, to=360.0, increment=1.0, width=6)
+		self.joint_step_entry.insert(0, "5")
+		self.joint_step_entry.grid(row=2, column=1, padx=(2, 5))
+		self.front_joint_angle_vars: list[tk.StringVar] = []
+		for joint_index in range(6):
+			column = 2 + joint_index * 3
+			ttk.Label(controls, text=f"J{joint_index + 1}").grid(row=2, column=column)
+			ttk.Button(
+				controls, text="-", width=1,
+				command=lambda index=joint_index: self._jog_joint(index, -1),
+			).grid(row=2, column=column + 1, padx=1)
+			angle_var = tk.StringVar(master=self.root, value="0.0°")
+			self.front_joint_angle_vars.append(angle_var)
+			ttk.Button(
+				controls, text="+", width=1,
+				command=lambda index=joint_index: self._jog_joint(index, 1),
+			).grid(row=2, column=column + 2, padx=1)
+			ttk.Label(controls, textvariable=angle_var, width=6, anchor=tk.CENTER).grid(
+				row=3, column=column, columnspan=3
+			)
+		self.jog_status_label = ttk.Label(self.view_tab, anchor=tk.W, padding=(4, 1))
+		self.jog_status_label.pack(fill=tk.X)
 
 	def _copy_t6_position(self) -> None:
 		transform = forward_kinematics(self.parameters)[-1]
@@ -225,36 +243,6 @@ class RobotArmSimulator:
 		self.root.clipboard_append(clipboard_text)
 		self.jog_status_label.configure(text="Copied T6 pose and joint angles")
 
-	def _build_joint_jog_controls(self) -> None:
-		controls = ttk.Frame(self.view_tab, padding=(4, 2, 4, 6))
-		controls.pack(fill=tk.X)
-		ttk.Label(controls, text="Joint step (deg)").pack(side=tk.LEFT, padx=(0, 6))
-		self.joint_step_entry = ttk.Spinbox(
-			controls, from_=0.1, to=360.0, increment=1.0, width=7
-		)
-		self.joint_step_entry.insert(0, "5")
-		self.joint_step_entry.pack(side=tk.LEFT, padx=(0, 8))
-		self.front_joint_angle_vars: list[tk.StringVar] = []
-		for joint_index in range(6):
-			joint_controls = ttk.Frame(controls, padding=(3, 0))
-			joint_controls.pack(side=tk.LEFT)
-			ttk.Label(joint_controls, text=f"J{joint_index + 1}").pack(side=tk.LEFT, padx=(0, 2))
-			ttk.Button(
-				joint_controls,
-				text="-",
-				width=2,
-				command=lambda index=joint_index: self._jog_joint(index, -1),
-			).pack(side=tk.LEFT)
-			angle_var = tk.StringVar(master=self.root, value="0.0°")
-			self.front_joint_angle_vars.append(angle_var)
-			ttk.Label(joint_controls, textvariable=angle_var, width=8, anchor=tk.CENTER).pack(side=tk.LEFT)
-			ttk.Button(
-				joint_controls,
-				text="+",
-				width=2,
-				command=lambda index=joint_index: self._jog_joint(index, 1),
-			).pack(side=tk.LEFT)
-
 	def _sync_joint_angle_views(self, joint_angles_degrees: tuple[float, ...]) -> None:
 		for entry, angle, display_var in zip(
 			self.joint_angle_entries, joint_angles_degrees, self.front_joint_angle_vars
@@ -273,15 +261,12 @@ class RobotArmSimulator:
 		except ValueError as error:
 			self.jog_status_label.configure(text=str(error))
 			return
-
 		joint_angles[joint_index] += direction * step
 		updated_angles = tuple(joint_angles)
 		self._sync_joint_angle_views(updated_angles)
 		self.parameters = self._to_dh_parameters(static_values, updated_angles)
 		self._render_scene()
-		self.jog_status_label.configure(
-			text=f"Jogged J{joint_index + 1} {direction * step:+g} deg"
-		)
+		self.jog_status_label.configure(text=f"Jogged J{joint_index + 1} {direction * step:+g} deg")
 
 	def _apply_joint_solution(
 		self,
@@ -305,30 +290,21 @@ class RobotArmSimulator:
 		except ValueError as error:
 			self.jog_status_label.configure(text=str(error))
 			return
-
 		current_pose = forward_kinematics(current_parameters)[-1]
 		target_pose = offset_pose_translation(current_pose, axis, direction * step)
 		solutions = inverse_kinematics(
-			target_pose,
-			geometry,
-			preferred_theta3=math.radians(joint_angles_degrees[2]),
+			target_pose, geometry, preferred_theta3=math.radians(joint_angles_degrees[2])
 		)
 		current_angles = tuple(math.radians(angle) for angle in joint_angles_degrees)
 		if not solutions:
 			self.jog_status_label.configure(text="No exact-pose IK solution; robot was not moved.")
 			return
-		new_angles = min(
-			solutions,
-			key=lambda solution: sum(
-				math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
-				for candidate, current in zip(solution.angles, current_angles)
-			),
-		).angles
-
+		new_angles = min(solutions, key=lambda solution: sum(
+			math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
+			for candidate, current in zip(solution.angles, current_angles)
+		)).angles
 		self._apply_joint_solution(static_values, new_angles)
-		axis_name = "XYZ"[axis]
-		displacement = direction * step
-		self.jog_status_label.configure(text=f"Moved {axis_name} {displacement:+g}")
+		self.jog_status_label.configure(text=f"Moved {'XYZ'[axis]} {direction * step:+g}")
 
 	def _jog_rotation_world(self, axis: int, direction: int) -> None:
 		try:
@@ -340,31 +316,24 @@ class RobotArmSimulator:
 		except ValueError as error:
 			self.jog_status_label.configure(text=str(error))
 			return
-
-		current_parameters = self._to_dh_parameters(static_values, joint_angles_degrees)
-		current_pose = forward_kinematics(current_parameters)[-1]
-		delta = math.radians(direction * step_degrees)
-		target_pose = rotate_pose_world_axis(current_pose, axis, delta)
+		current_pose = forward_kinematics(
+			self._to_dh_parameters(static_values, joint_angles_degrees)
+		)[-1]
+		target_pose = rotate_pose_world_axis(current_pose, axis, math.radians(direction * step_degrees))
 		solutions = inverse_kinematics(
-			target_pose,
-			self._to_dh_parameters(static_values),
-			preferred_theta3=math.radians(joint_angles_degrees[2]),
+			target_pose, self._to_dh_parameters(static_values),
+			preferred_theta3=math.radians(joint_angles_degrees[2])
 		)
 		if not solutions:
 			self.jog_status_label.configure(text="No exact-pose IK solution; robot was not moved.")
 			return
-
 		current_angles = tuple(math.radians(angle) for angle in joint_angles_degrees)
-		new_angles = min(
-			solutions,
-			key=lambda solution: sum(
-				math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
-				for candidate, current in zip(solution.angles, current_angles)
-			),
-		).angles
+		new_angles = min(solutions, key=lambda solution: sum(
+			math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
+			for candidate, current in zip(solution.angles, current_angles)
+		)).angles
 		self._apply_joint_solution(static_values, new_angles)
-		axis_name = "XYZ"[axis]
-		self.jog_status_label.configure(text=f"Rotated R{axis_name} {direction * step_degrees:+g} deg")
+		self.jog_status_label.configure(text=f"Rotated R{'XYZ'[axis]} {direction * step_degrees:+g} deg")
 
 	def _build_parameter_tab(self) -> None:
 		self.parameter_notebook = ttk.Notebook(self.parameters_tab)
@@ -421,6 +390,24 @@ class RobotArmSimulator:
 		ttk.Label(self.dh_tab, text=f"File: {self.config_path.name} · Joint angles start at zero and are not saved.").grid(
 			row=11, column=0, columnspan=6, sticky=tk.W, pady=(4, 0)
 		)
+		ttk.Checkbutton(
+			self.dh_tab,
+			text="Show joint labels in 3D View",
+			variable=self.show_joint_labels,
+			command=self._render_scene,
+		).grid(row=12, column=0, columnspan=6, sticky=tk.W, pady=(10, 2))
+		ttk.Label(self.dh_tab, text="Coordinate gizmos").grid(
+			row=13, column=0, sticky=tk.W, pady=(4, 2)
+		)
+		gizmo_controls = ttk.Frame(self.dh_tab)
+		gizmo_controls.grid(row=14, column=0, columnspan=6, sticky=tk.W)
+		for index, (frame_name, variable) in enumerate(zip(MESH_FRAME_NAMES, self.coordinate_gizmo_vars)):
+			ttk.Checkbutton(
+				gizmo_controls,
+				text=frame_name,
+				variable=variable,
+				command=self._render_scene,
+			).grid(row=0, column=index, sticky=tk.W, padx=(0, 8))
 		self._build_mesh_tab()
 
 	def _build_mesh_tab(self) -> None:
@@ -593,6 +580,8 @@ class RobotArmSimulator:
 			"schema_version": 1,
 			"units": {"angles": "degrees", "lengths": "model_units"},
 			"show_mesh_edges": self.show_mesh_edges.get(),
+			"show_coordinate_gizmos": [variable.get() for variable in self.coordinate_gizmo_vars],
+			"show_joint_labels": self.show_joint_labels.get(),
 			"joints": [
 				{"theta_offset_deg": theta, "d": d, "a": a, "alpha_deg": alpha}
 				for theta, d, a, alpha in values
@@ -628,7 +617,13 @@ class RobotArmSimulator:
 
 	def _read_json_configuration(
 		self,
-	) -> tuple[tuple[tuple[float, float, float, float], ...], tuple[MeshSetting, ...], bool]:
+	) -> tuple[
+		tuple[tuple[float, float, float, float], ...],
+		tuple[MeshSetting, ...],
+		bool,
+		tuple[bool, ...],
+		bool,
+	]:
 		data = json.loads(self.config_path.read_text(encoding="utf-8"))
 		if not isinstance(data, dict):
 			raise ValueError("Parameter file must contain a JSON object.")
@@ -656,8 +651,19 @@ class RobotArmSimulator:
 		show_mesh_edges = data.get("show_mesh_edges", False)
 		if not isinstance(show_mesh_edges, bool):
 			raise ValueError("show_mesh_edges must be true or false.")
+		gizmo_visibility = data.get("show_coordinate_gizmos", [True] * len(MESH_FRAME_NAMES))
+		if (
+			not isinstance(gizmo_visibility, list)
+			or len(gizmo_visibility) != len(MESH_FRAME_NAMES)
+			or not all(isinstance(visible, bool) for visible in gizmo_visibility)
+		):
+			raise ValueError("show_coordinate_gizmos must contain seven true/false values.")
+		gizmo_visibility = tuple(gizmo_visibility)
+		show_joint_labels = data.get("show_joint_labels", True)
+		if not isinstance(show_joint_labels, bool):
+			raise ValueError("show_joint_labels must be true or false.")
 		if mesh_data is None:
-			return dh_values, self._default_mesh_settings(), show_mesh_edges
+			return dh_values, self._default_mesh_settings(), show_mesh_edges, gizmo_visibility, show_joint_labels
 		if not isinstance(mesh_data, list) or len(mesh_data) != len(MESH_FRAME_NAMES):
 			raise ValueError("Parameter file must contain seven mesh settings: base and joints 1-6.")
 		mesh_settings = []
@@ -686,14 +692,14 @@ class RobotArmSimulator:
 					mesh_path = self.config_path.parent / mesh_path
 				path = str(mesh_path.resolve())
 			mesh_settings.append(MeshSetting(path, offset_values, rotation_values, opacity))
-		return dh_values, tuple(mesh_settings), show_mesh_edges
+		return dh_values, tuple(mesh_settings), show_mesh_edges, gizmo_visibility, show_joint_labels
 
 	def _read_json_parameters(self) -> tuple[tuple[float, float, float, float], ...]:
 		return self._read_json_configuration()[0]
 
 	def _load_json(self) -> None:
 		try:
-			values, mesh_settings, show_mesh_edges = self._read_json_configuration()
+			values, mesh_settings, show_mesh_edges, gizmo_visibility, show_joint_labels = self._read_json_configuration()
 		except (OSError, ValueError, TypeError, KeyError) as error:
 			messagebox.showerror("Could not load parameters", str(error), parent=self.root)
 			return
@@ -704,7 +710,41 @@ class RobotArmSimulator:
 		self._sync_joint_angle_views(joint_angles)
 		self.mesh_settings = mesh_settings
 		self.show_mesh_edges.set(show_mesh_edges)
+		for variable, visible in zip(self.coordinate_gizmo_vars, gizmo_visibility):
+			variable.set(visible)
+		self.show_joint_labels.set(show_joint_labels)
 		self._render_scene()
+
+	def _draw_xy_background_grid(
+		self,
+		x_min: float,
+		x_max: float,
+		y_min: float,
+		y_max: float,
+		radius: float,
+	) -> None:
+		"""Draw a subdued, scale-adaptive XY reference grid on the Z=0 plane."""
+		raw_spacing = max(radius / 5.0, 1e-9)
+		magnitude = 10.0 ** math.floor(math.log10(raw_spacing))
+		spacing = next(
+			(multiplier * magnitude for multiplier in (1.0, 2.0, 5.0, 10.0)
+			 if multiplier * magnitude >= raw_spacing),
+			10.0 * magnitude,
+		)
+		first_x = math.ceil(x_min / spacing) * spacing
+		last_x = math.floor(x_max / spacing) * spacing
+		first_y = math.ceil(y_min / spacing) * spacing
+		last_y = math.floor(y_max / spacing) * spacing
+		for x_value in np.arange(first_x, last_x + spacing * 0.5, spacing):
+			self.axes.plot(
+				[x_value, x_value], [y_min, y_max], [0.0, 0.0],
+				color="#cbd5da", linewidth=0.55, alpha=0.65,
+			)
+		for y_value in np.arange(first_y, last_y + spacing * 0.5, spacing):
+			self.axes.plot(
+				[x_min, x_max], [y_value, y_value], [0.0, 0.0],
+				color="#cbd5da", linewidth=0.55, alpha=0.65,
+			)
 
 	def _render_scene(self) -> None:
 		transforms = forward_kinematics(self.parameters)
@@ -759,6 +799,13 @@ class RobotArmSimulator:
 		self.axes.set_xlim(center[0] - half_span, center[0] + half_span)
 		self.axes.set_ylim(center[1] - half_span, center[1] + half_span)
 		self.axes.set_zlim(center[2] - half_span, center[2] + half_span)
+		self._draw_xy_background_grid(
+			center[0] - half_span,
+			center[0] + half_span,
+			center[1] - half_span,
+			center[1] + half_span,
+			radius,
+		)
 		self.axes.plot(
 			[point[0] for point in frame_origins],
 			[point[1] for point in frame_origins],
@@ -770,6 +817,8 @@ class RobotArmSimulator:
 		axis_colors = ("#d94a45", "#31845b", "#3978c5")
 		marker_length = radius * 0.14
 		for frame_index, (origin, transform) in enumerate(zip(frame_origins, frame_transforms)):
+			if not self.coordinate_gizmo_vars[frame_index].get():
+				continue
 			rotation = (
 				((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
 				if transform is None
@@ -783,11 +832,13 @@ class RobotArmSimulator:
 					linewidth=1.5,
 					arrow_length_ratio=0.24,
 				)
-			self.axes.text(
-				origin[0], origin[1], origin[2] + marker_length * 0.2,
-				"Base" if frame_index == 0 else f"J{frame_index}",
-				color="#26323b", fontsize=8,
-			)
+		if self.show_joint_labels.get():
+			for frame_index, origin in enumerate(frame_origins):
+				self.axes.text(
+					origin[0], origin[1], origin[2] + marker_length * 0.2,
+					"Base" if frame_index == 0 else f"J{frame_index}",
+					color="#26323b", fontsize=8,
+				)
 
 		if mesh_errors:
 			self.mesh_status.configure(text="Mesh load issue: " + "; ".join(mesh_errors))

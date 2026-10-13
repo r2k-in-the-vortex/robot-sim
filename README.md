@@ -31,6 +31,12 @@ DH and mesh settings in `robot_parameters.json`; mesh paths are stored relative
 to the configuration file when possible. The included DH values are illustrative
 starter dimensions, not measurements for a specific robot.
 
+The DH Parameters tab also has independent coordinate-gizmo visibility
+checkboxes for the base and J1-J6. All are visible by default, and their states
+are stored in `show_coordinate_gizmos` in `robot_parameters.json`.
+Joint labels have a separate show/hide checkbox, defaulting to visible, and the
+3D View includes a scale-adaptive XY reference grid on the Z=0 plane.
+
 1) next we need mathematical model of forward transformation, to go from joint angles to joint positions and final end of arm positions. That is a series of matrix multiplications, for each of 6 axes, according to Denavit–Hartenberg Convention. We need function to create per joint martixes using parameters:
     • \(\theta _{i}\): Joint angle (rotation about the previous \(Z\) axis)
     • \(d_{i}\): Link offset (translation along the previous \(Z\) axis)
