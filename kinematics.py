@@ -40,7 +40,7 @@ class DHParameters:
 	alpha: float
 
 
-def dh_transform(parameters: DHParameters) -> Matrix4:
+def dh_transform_standard(parameters: DHParameters) -> Matrix4:
 	"""Return the standard-DH transform from frame i to frame i - 1."""
 	theta = parameters.theta
 	alpha = parameters.alpha
@@ -78,7 +78,7 @@ def forward_kinematics(parameters: Sequence[DHParameters]) -> tuple[Matrix4, ...
 		(0.0, 0.0, 0.0, 1.0),
 	)
 	for joint_parameters in parameters:
-		current_transform = multiply_transforms(current_transform, dh_transform(joint_parameters))
+		current_transform = multiply_transforms(current_transform, dh_transform_standard(joint_parameters))
 		transforms.append(current_transform)
 	return tuple(transforms)
 
