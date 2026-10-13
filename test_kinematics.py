@@ -362,6 +362,23 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		finally:
 			app.root.destroy()
 
+	def test_tk_view_starts_isometric_and_preserves_orbit_on_redraw(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			self.assertAlmostEqual(app.axes.elev, 35.264, delta=1e-3)
+			self.assertAlmostEqual(app.axes.azim, -45.0, delta=1e-3)
+			self.assertEqual(app.axes.name, "3d")
+			app.axes.view_init(elev=22.0, azim=61.0)
+			app._render_scene()
+			self.assertAlmostEqual(app.axes.elev, 22.0, delta=1e-3)
+			self.assertAlmostEqual(app.axes.azim, 61.0, delta=1e-3)
+		finally:
+			app.root.destroy()
+
 
 if __name__ == "__main__":
 	unittest.main()

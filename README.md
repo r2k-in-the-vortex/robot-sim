@@ -15,7 +15,8 @@ python simulator.py
 
 The **3D View** tab displays the base and all six joint frames. Drag with the
 left mouse button to orbit, drag with the right mouse button to pan, and use the
-scroll wheel to zoom. The **Parameters** tab contains separate **DH Parameters**
+scroll wheel to zoom. The view starts in an isometric orthographic angle. The
+**Parameters** tab contains separate **DH Parameters**
 and **Meshes** tabs. DH values are editable per joint; angles are entered in
 degrees, while `d`, `a`, and mesh offsets use consistent model units. The DH
 table separates each joint's static theta offset from its runtime joint angle.

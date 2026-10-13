@@ -120,6 +120,7 @@ class RobotArmSimulator:
 		self.config_path = Path(__file__).with_name("robot_parameters.json")
 		self._drag_button: int | None = None
 		self._last_mouse_position: tuple[float, float] | None = None
+		self._camera_initialized = False
 		self.parameters = self._to_dh_parameters(DEFAULT_DH_VALUES)
 		self.mesh_settings = self._default_mesh_settings()
 		self.show_mesh_edges = tk.BooleanVar(master=self.root, value=False)
@@ -747,10 +748,19 @@ class RobotArmSimulator:
 			)
 
 	def _render_scene(self) -> None:
+		if self._camera_initialized:
+			camera_elevation = self.axes.elev
+			camera_azimuth = self.axes.azim
+		else:
+			camera_elevation = 35.264
+			camera_azimuth = -45.0
 		transforms = forward_kinematics(self.parameters)
 		frame_origins = ((0.0, 0.0, 0.0),) + tuple(frame_origin(transform) for transform in transforms)
 		frame_transforms = (None,) + transforms
 		self.axes.clear()
+		self.axes.set_proj_type("ortho")
+		self.axes.view_init(elev=camera_elevation, azim=camera_azimuth)
+		self._camera_initialized = True
 		self.axes.set_facecolor("#f4f6f7")
 		self.axes.set_axis_off()
 		self.axes.set_box_aspect((1, 1, 1))
