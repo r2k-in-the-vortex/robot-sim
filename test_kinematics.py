@@ -19,7 +19,11 @@ from kinematics import (
 	inverse_kinematics_position,
 	inverse_kinematics_position_preserving_roll_yaw,
 )
-from simulator import _rotation_to_rpy_degrees, offset_pose_translation
+from simulator import (
+	_rotation_to_rpy_degrees,
+	offset_pose_translation,
+	rotate_pose_world_axis,
+)
 
 
 def configured_geometry() -> tuple[DHParameters, ...]:
@@ -178,6 +182,15 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 					)
 				self.assertTrue(inverse_kinematics(target_pose, self.geometry))
 
+	def test_world_rotation_jog_premultiplies_rotation_and_preserves_position(self) -> None:
+		pose = forward_kinematics(parameters_at_angles(self.geometry, (0.2, -0.3, 0.4, -0.1, 0.5, -0.6)))[-1]
+		rotated = rotate_pose_world_axis(pose, 2, math.pi / 2)
+		self.assertEqual(frame_origin(rotated), frame_origin(pose))
+		for column in range(3):
+			self.assertAlmostEqual(rotated[0][column], -pose[1][column], delta=1e-12)
+			self.assertAlmostEqual(rotated[1][column], pose[0][column], delta=1e-12)
+			self.assertAlmostEqual(rotated[2][column], pose[2][column], delta=1e-12)
+
 	def test_plus_y_jog_from_requested_t6_position_is_reachable(self) -> None:
 		startup_pose = [list(row) for row in forward_kinematics(self.geometry)[-1]]
 		startup_pose[0][3] = 36.0
@@ -214,13 +227,14 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		self.assertAlmostEqual(achieved_rpy[0], math.degrees(start_rpy[0]), delta=1e-4)
 		self.assertAlmostEqual(achieved_rpy[2], math.degrees(start_rpy[2]), delta=1e-4)
 
-	def test_tk_y_jog_applies_position_solution(self) -> None:
+	def test_tk_y_jog_preserves_orientation_or_refuses_move(self) -> None:
 		try:
 			from simulator import RobotArmSimulator
 			app = RobotArmSimulator()
 		except tk.TclError as error:
 			self.skipTest(f"Tk display unavailable: {error}")
 		try:
+			self.assertEqual(app.jog_step_entry.get(), "1")
 			start_solution = inverse_kinematics_position(
 				(36.0, 0.0, 58.0), self.geometry, initial_angles=(0.0,) * 6
 			)
@@ -234,18 +248,94 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			for actual, expected in zip(start_position, (36.0, 0.0, 58.0)):
 				self.assertAlmostEqual(actual, expected, delta=1e-5)
 			start_pose = forward_kinematics(app.parameters)[-1]
-			start_rpy = _rotation_to_rpy_degrees(start_pose)
-			app.jog_step_entry.delete(0, tk.END)
-			app.jog_step_entry.insert(0, "1")
 			app._jog_cartesian(1, 1)
-			self.assertIn("Moved Y +1 (pitch adjusted)", app.jog_status_label.cget("text"))
 			end_pose = forward_kinematics(app.parameters)[-1]
-			achieved = frame_origin(end_pose)
-			for actual, expected in zip(achieved, (36.0, 1.0, 58.0)):
+			self.assertIn("No exact-pose IK solution", app.jog_status_label.cget("text"))
+			for before_row, after_row in zip(start_pose, end_pose):
+				for before_value, after_value in zip(before_row, after_row):
+					self.assertAlmostEqual(before_value, after_value, delta=1e-9)
+			app._copy_t6_position()
+			copied_lines = app.root.clipboard_get().splitlines()
+			self.assertEqual(copied_lines[0], "T6 position (model units):")
+			self.assertEqual(copied_lines[4], "T6 orientation (RPY, ZYX, degrees):")
+			self.assertEqual(copied_lines[8], "Runtime joint angles (degrees):")
+			self.assertEqual(len(copied_lines), 15)
+			copied_position = tuple(float(copied_lines[index].split(": ", 1)[1]) for index in (1, 2, 3))
+			for actual, expected in zip(copied_position, (36.0, 0.0, 58.0)):
 				self.assertAlmostEqual(actual, expected, delta=1e-5)
-			end_rpy = _rotation_to_rpy_degrees(end_pose)
-			self.assertAlmostEqual(end_rpy[0], start_rpy[0], delta=1e-4)
-			self.assertAlmostEqual(end_rpy[2], start_rpy[2], delta=1e-4)
+			copied_angles = tuple(float(copied_lines[index].split(": ", 1)[1]) for index in range(9, 15))
+			for actual, entry in zip(copied_angles, app.joint_angle_entries):
+				self.assertAlmostEqual(actual, float(entry.get()), delta=1e-10)
+		finally:
+			app.root.destroy()
+
+	def test_tk_unreachable_minus_z_jog_does_not_change_orientation(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			start_rows = [list(row) for row in forward_kinematics(self.geometry)[-1]]
+			start_rows[0][3], start_rows[1][3], start_rows[2][3] = 52.0, -1.0, 70.0
+			start_pose = tuple(tuple(row) for row in start_rows)
+			start_solutions = inverse_kinematics(start_pose, self.geometry)
+			self.assertTrue(start_solutions)
+			start_angles = start_solutions[0].angles
+			for entry, angle in zip(app.joint_angle_entries, start_angles):
+				entry.delete(0, tk.END)
+				entry.insert(0, str(math.degrees(angle)))
+			self.assertTrue(app._apply_from_entries())
+			before = forward_kinematics(app.parameters)[-1]
+			app._jog_cartesian(2, -1)
+			after = forward_kinematics(app.parameters)[-1]
+			self.assertIn("No exact-pose IK solution", app.jog_status_label.cget("text"))
+			for before_row, after_row in zip(before, after):
+				for before_value, after_value in zip(before_row, after_row):
+					self.assertAlmostEqual(before_value, after_value, delta=1e-9)
+		finally:
+			app.root.destroy()
+
+	def test_tk_world_rotation_jog_keeps_t6_position_fixed(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			self.assertEqual(app.rotation_step_entry.get(), "5")
+			before = forward_kinematics(app.parameters)[-1]
+			expected = rotate_pose_world_axis(before, 1, math.radians(5.0))
+			app._jog_rotation_world(1, 1)
+			self.assertEqual(app.jog_status_label.cget("text"), "Rotated RY +5 deg")
+			after = forward_kinematics(app.parameters)[-1]
+			for actual, position in zip(frame_origin(after), frame_origin(before)):
+				self.assertAlmostEqual(actual, position, delta=1e-7)
+			for actual_row, expected_row in zip(after, expected):
+				for actual, expected_value in zip(actual_row[:3], expected_row[:3]):
+					self.assertAlmostEqual(actual, expected_value, delta=1e-7)
+		finally:
+			app.root.destroy()
+
+	def test_tk_joint_jogs_mirror_parameters_tab_angles(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			self.assertEqual(app.joint_step_entry.get(), "5")
+			app._jog_joint(0, 1)
+			self.assertEqual(float(app.joint_angle_entries[0].get()), 5.0)
+			self.assertEqual(app.front_joint_angle_vars[0].get(), "5.0°")
+			pose_after_front_jog = forward_kinematics(app.parameters)[-1]
+			self.assertNotEqual(frame_origin(pose_after_front_jog), frame_origin(forward_kinematics(self.geometry)[-1]))
+
+			app.joint_angle_entries[2].delete(0, tk.END)
+			app.joint_angle_entries[2].insert(0, "-12.5")
+			self.assertTrue(app._apply_from_entries())
+			self.assertEqual(app.front_joint_angle_vars[2].get(), "-12.5°")
+			self.assertAlmostEqual(app.parameters[2].theta, self.geometry[2].theta + math.radians(-12.5))
 		finally:
 			app.root.destroy()
 

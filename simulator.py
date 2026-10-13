@@ -24,7 +24,6 @@ from kinematics import (
 	forward_kinematics,
 	frame_origin,
 	inverse_kinematics,
-	inverse_kinematics_position_preserving_roll_yaw,
 )
 
 DEFAULT_DH_VALUES = (
@@ -66,6 +65,31 @@ def offset_pose_translation(
 		raise ValueError("translation distance must be finite")
 	result = [list(row) for row in pose]
 	result[axis][3] += distance
+	return tuple(tuple(row) for row in result)
+
+
+def rotate_pose_world_axis(
+	pose: tuple[tuple[float, ...], ...], axis: int, angle: float
+) -> tuple[tuple[float, ...], ...]:
+	"""Rotate a pose about a base-frame axis, keeping its origin fixed."""
+	if len(pose) != 4 or any(len(row) != 4 for row in pose):
+		raise ValueError("pose must be a 4x4 homogeneous transform")
+	if axis not in (0, 1, 2):
+		raise ValueError("axis must be 0 (X), 1 (Y), or 2 (Z)")
+	if not math.isfinite(angle):
+		raise ValueError("rotation angle must be finite")
+	cosine = math.cos(angle)
+	sine = math.sin(angle)
+	if axis == 0:
+		rotation = ((1.0, 0.0, 0.0), (0.0, cosine, -sine), (0.0, sine, cosine))
+	elif axis == 1:
+		rotation = ((cosine, 0.0, sine), (0.0, 1.0, 0.0), (-sine, 0.0, cosine))
+	else:
+		rotation = ((cosine, -sine, 0.0), (sine, cosine, 0.0), (0.0, 0.0, 1.0))
+	result = [list(row) for row in pose]
+	for row in range(3):
+		for column in range(3):
+			result[row][column] = sum(rotation[row][index] * pose[index][column] for index in range(3))
 	return tuple(tuple(row) for row in result)
 
 
@@ -112,8 +136,14 @@ class RobotArmSimulator:
 		self.canvas = FigureCanvasTkAgg(self.figure, master=self.view_tab)
 		self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 		self._build_cartesian_jog_controls()
-		self.pose_label = ttk.Label(self.view_tab, anchor=tk.W, padding=(4, 8))
-		self.pose_label.pack(fill=tk.X)
+		self._build_joint_jog_controls()
+		pose_row = ttk.Frame(self.view_tab)
+		pose_row.pack(fill=tk.X)
+		self.pose_label = ttk.Label(pose_row, anchor=tk.W, padding=(4, 8))
+		self.pose_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+		ttk.Button(pose_row, text="Copy XYZ", command=self._copy_t6_position).pack(
+			side=tk.RIGHT, padx=(8, 4)
+		)
 		self.figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
 		self._build_parameter_tab()
@@ -144,7 +174,7 @@ class RobotArmSimulator:
 		self.jog_step_entry = ttk.Spinbox(
 			controls, from_=0.001, to=1_000_000.0, increment=0.01, width=9
 		)
-		self.jog_step_entry.insert(0, "0.01")
+		self.jog_step_entry.insert(0, "1")
 		self.jog_step_entry.pack(side=tk.LEFT, padx=(0, 10))
 		for axis, name in enumerate(("X", "Y", "Z")):
 			for direction, suffix in ((-1, "-"), (1, "+")):
@@ -156,6 +186,112 @@ class RobotArmSimulator:
 				).pack(side=tk.LEFT, padx=2)
 		self.jog_status_label = ttk.Label(controls, anchor=tk.W)
 		self.jog_status_label.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+
+		rotation_controls = ttk.Frame(self.view_tab, padding=(4, 2, 4, 6))
+		rotation_controls.pack(fill=tk.X)
+		ttk.Label(rotation_controls, text="World rotation step (deg)").pack(side=tk.LEFT, padx=(0, 6))
+		self.rotation_step_entry = ttk.Spinbox(
+			rotation_controls, from_=0.1, to=360.0, increment=1.0, width=9
+		)
+		self.rotation_step_entry.insert(0, "5")
+		self.rotation_step_entry.pack(side=tk.LEFT, padx=(0, 10))
+		for axis, name in enumerate(("X", "Y", "Z")):
+			for direction, suffix in ((-1, "-"), (1, "+")):
+				ttk.Button(
+					rotation_controls,
+					text=f"R{name}{suffix}",
+					width=5,
+					command=lambda axis=axis, direction=direction: self._jog_rotation_world(axis, direction),
+				).pack(side=tk.LEFT, padx=2)
+
+	def _copy_t6_position(self) -> None:
+		transform = forward_kinematics(self.parameters)[-1]
+		tool_position = frame_origin(transform)
+		roll, pitch, yaw = _rotation_to_rpy_degrees(transform)
+		joint_angles = self._read_joint_angle_values()
+		clipboard_text = "\n".join((
+			"T6 position (model units):",
+			f"X: {tool_position[0]:.15g}",
+			f"Y: {tool_position[1]:.15g}",
+			f"Z: {tool_position[2]:.15g}",
+			"T6 orientation (RPY, ZYX, degrees):",
+			f"Roll: {roll:.15g}",
+			f"Pitch: {pitch:.15g}",
+			f"Yaw: {yaw:.15g}",
+			"Runtime joint angles (degrees):",
+			*(f"J{index}: {angle:.15g}" for index, angle in enumerate(joint_angles, start=1)),
+		))
+		self.root.clipboard_clear()
+		self.root.clipboard_append(clipboard_text)
+		self.jog_status_label.configure(text="Copied T6 pose and joint angles")
+
+	def _build_joint_jog_controls(self) -> None:
+		controls = ttk.Frame(self.view_tab, padding=(4, 2, 4, 6))
+		controls.pack(fill=tk.X)
+		ttk.Label(controls, text="Joint step (deg)").pack(side=tk.LEFT, padx=(0, 6))
+		self.joint_step_entry = ttk.Spinbox(
+			controls, from_=0.1, to=360.0, increment=1.0, width=7
+		)
+		self.joint_step_entry.insert(0, "5")
+		self.joint_step_entry.pack(side=tk.LEFT, padx=(0, 8))
+		self.front_joint_angle_vars: list[tk.StringVar] = []
+		for joint_index in range(6):
+			joint_controls = ttk.Frame(controls, padding=(3, 0))
+			joint_controls.pack(side=tk.LEFT)
+			ttk.Label(joint_controls, text=f"J{joint_index + 1}").pack(side=tk.LEFT, padx=(0, 2))
+			ttk.Button(
+				joint_controls,
+				text="-",
+				width=2,
+				command=lambda index=joint_index: self._jog_joint(index, -1),
+			).pack(side=tk.LEFT)
+			angle_var = tk.StringVar(master=self.root, value="0.0°")
+			self.front_joint_angle_vars.append(angle_var)
+			ttk.Label(joint_controls, textvariable=angle_var, width=8, anchor=tk.CENTER).pack(side=tk.LEFT)
+			ttk.Button(
+				joint_controls,
+				text="+",
+				width=2,
+				command=lambda index=joint_index: self._jog_joint(index, 1),
+			).pack(side=tk.LEFT)
+
+	def _sync_joint_angle_views(self, joint_angles_degrees: tuple[float, ...]) -> None:
+		for entry, angle, display_var in zip(
+			self.joint_angle_entries, joint_angles_degrees, self.front_joint_angle_vars
+		):
+			entry.delete(0, tk.END)
+			entry.insert(0, self._format_value(angle))
+			display_var.set(f"{angle:.1f}°")
+
+	def _jog_joint(self, joint_index: int, direction: int) -> None:
+		try:
+			static_values = self._read_entry_values()
+			joint_angles = list(self._read_joint_angle_values())
+			step = float(self.joint_step_entry.get())
+			if not math.isfinite(step) or step <= 0:
+				raise ValueError("Joint step must be a finite positive angle.")
+		except ValueError as error:
+			self.jog_status_label.configure(text=str(error))
+			return
+
+		joint_angles[joint_index] += direction * step
+		updated_angles = tuple(joint_angles)
+		self._sync_joint_angle_views(updated_angles)
+		self.parameters = self._to_dh_parameters(static_values, updated_angles)
+		self._render_scene()
+		self.jog_status_label.configure(
+			text=f"Jogged J{joint_index + 1} {direction * step:+g} deg"
+		)
+
+	def _apply_joint_solution(
+		self,
+		static_values: tuple[tuple[float, float, float, float], ...],
+		joint_angles_radians: tuple[float, ...],
+	) -> None:
+		joint_angles_degrees = tuple(math.degrees(angle) for angle in joint_angles_radians)
+		self._sync_joint_angle_views(joint_angles_degrees)
+		self.parameters = self._to_dh_parameters(static_values, joint_angles_degrees)
+		self._render_scene()
 
 	def _jog_cartesian(self, axis: int, direction: int) -> None:
 		try:
@@ -178,41 +314,57 @@ class RobotArmSimulator:
 			preferred_theta3=math.radians(joint_angles_degrees[2]),
 		)
 		current_angles = tuple(math.radians(angle) for angle in joint_angles_degrees)
-		orientation_adjusted = False
-		if solutions:
-			new_angles = min(
-				solutions,
-				key=lambda solution: sum(
-					math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
-					for candidate, current in zip(solution.angles, current_angles)
-				),
-			).angles
-		else:
-			current_roll, _, current_yaw = _rotation_to_rpy_degrees(current_pose)
-			position_solution = inverse_kinematics_position_preserving_roll_yaw(
-				tuple(target_pose[axis][3] for axis in range(3)),
-				geometry,
-				initial_angles=current_angles,
-				preserved_roll_yaw=(math.radians(current_roll), math.radians(current_yaw)),
-			)
-			if position_solution is None:
-				self.jog_status_label.configure(text="No IK solution preserving roll and yaw for that step.")
-				return
-			new_angles = position_solution.angles
-			orientation_adjusted = True
+		if not solutions:
+			self.jog_status_label.configure(text="No exact-pose IK solution; robot was not moved.")
+			return
+		new_angles = min(
+			solutions,
+			key=lambda solution: sum(
+				math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
+				for candidate, current in zip(solution.angles, current_angles)
+			),
+		).angles
 
-		for entry, angle in zip(self.joint_angle_entries, new_angles):
-			entry.delete(0, tk.END)
-			entry.insert(0, self._format_value(math.degrees(angle)))
-		self.parameters = self._to_dh_parameters(
-			static_values,
-			tuple(math.degrees(angle) for angle in new_angles),
-		)
-		self._render_scene()
+		self._apply_joint_solution(static_values, new_angles)
 		axis_name = "XYZ"[axis]
 		displacement = direction * step
-		orientation_note = " (pitch adjusted)" if orientation_adjusted else ""
-		self.jog_status_label.configure(text=f"Moved {axis_name} {displacement:+g}{orientation_note}")
+		self.jog_status_label.configure(text=f"Moved {axis_name} {displacement:+g}")
+
+	def _jog_rotation_world(self, axis: int, direction: int) -> None:
+		try:
+			static_values = self._read_entry_values()
+			joint_angles_degrees = self._read_joint_angle_values()
+			step_degrees = float(self.rotation_step_entry.get())
+			if not math.isfinite(step_degrees) or step_degrees <= 0:
+				raise ValueError("Rotation step must be a finite positive angle.")
+		except ValueError as error:
+			self.jog_status_label.configure(text=str(error))
+			return
+
+		current_parameters = self._to_dh_parameters(static_values, joint_angles_degrees)
+		current_pose = forward_kinematics(current_parameters)[-1]
+		delta = math.radians(direction * step_degrees)
+		target_pose = rotate_pose_world_axis(current_pose, axis, delta)
+		solutions = inverse_kinematics(
+			target_pose,
+			self._to_dh_parameters(static_values),
+			preferred_theta3=math.radians(joint_angles_degrees[2]),
+		)
+		if not solutions:
+			self.jog_status_label.configure(text="No exact-pose IK solution; robot was not moved.")
+			return
+
+		current_angles = tuple(math.radians(angle) for angle in joint_angles_degrees)
+		new_angles = min(
+			solutions,
+			key=lambda solution: sum(
+				math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
+				for candidate, current in zip(solution.angles, current_angles)
+			),
+		).angles
+		self._apply_joint_solution(static_values, new_angles)
+		axis_name = "XYZ"[axis]
+		self.jog_status_label.configure(text=f"Rotated R{axis_name} {direction * step_degrees:+g} deg")
 
 	def _build_parameter_tab(self) -> None:
 		self.parameter_notebook = ttk.Notebook(self.parameters_tab)
@@ -425,6 +577,7 @@ class RobotArmSimulator:
 			return False
 		self.parameters = parameters
 		self.mesh_settings = mesh_settings
+		self._sync_joint_angle_views(self._read_joint_angle_values())
 		self._render_scene()
 		return True
 
@@ -451,7 +604,9 @@ class RobotArmSimulator:
 		except OSError as error:
 			messagebox.showerror("Could not save parameters", str(error), parent=self.root)
 			return
-		self.parameters = self._to_dh_parameters(values, self._read_joint_angle_values())
+		joint_angles = self._read_joint_angle_values()
+		self.parameters = self._to_dh_parameters(values, joint_angles)
+		self._sync_joint_angle_views(joint_angles)
 		self.mesh_settings = mesh_settings
 		self._render_scene()
 		messagebox.showinfo("Parameters saved", f"Saved to {self.config_path.name}.", parent=self.root)
@@ -544,7 +699,9 @@ class RobotArmSimulator:
 			return
 		self._populate_dh_entries(values)
 		self._populate_mesh_entries(mesh_settings)
-		self.parameters = self._to_dh_parameters(values, self._read_joint_angle_values())
+		joint_angles = self._read_joint_angle_values()
+		self.parameters = self._to_dh_parameters(values, joint_angles)
+		self._sync_joint_angle_views(joint_angles)
 		self.mesh_settings = mesh_settings
 		self.show_mesh_edges.set(show_mesh_edges)
 		self._render_scene()
