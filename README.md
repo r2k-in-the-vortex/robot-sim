@@ -91,3 +91,9 @@ its `J1`–`J6` minus/plus buttons and a configurable joint-angle step. The
 displayed runtime angles stay synchronized with the Joint Angle fields in the
 Parameters tab; applying angle edits there also refreshes the front-screen
 readouts.
+
+## Force torque control
+
+1) for Force torque control to be possible, 6DOF force sensor readings must be recalculated from one frame of reference to another. For example from sensor frame to tooltip frame where the contact point actually is.
+
+2) to validate the mathematics of the force/torque control, before implementing it in code, the mathematics should be proved in lean/TorqueWrench.lean
