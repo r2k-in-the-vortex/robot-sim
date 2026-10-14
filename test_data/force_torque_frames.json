@@ -1,9 +1,69 @@
 {"source": "lean/TorqueWrench.lean, evaluated over the rationals (exact)",
- "schema_version": 1,
+ "schema_version": 2,
  "conventions":
  "R rotates tip coordinates into sensor coordinates, p is the tip origin in sensor coordinates, rows are row-major so `R i j` is Python `R[i][j]`, and every numeral is an exact integer or \"num/den\" string.",
+ "chains":
+ [{"tip_wrench": {"torque": ["0", "1", "-1/2"], "force": ["2", "-1", "1"]},
+   "sensor_twist": {"v": ["1", "0", "-1/2"], "omega": ["0", "1/2", "2"]},
+   "p2": ["1/2", "0", "-1"],
+   "p1": ["0", "0", "3"],
+   "name": "chain_translation_then_345",
+   "expected":
+   {"tip_twist_two_steps":
+    {"v": ["11/5", "-2/5", "-3/4"], "omega": ["3/10", "2/5", "2"]},
+    "tip_twist_one_step":
+    {"v": ["11/5", "-2/5", "-3/4"], "omega": ["3/10", "2/5", "2"]},
+    "sensor_wrench_two_steps":
+    {"torque": ["-7/5", "47/10", "-3/10"], "force": ["11/5", "2/5", "1"]},
+    "sensor_wrench_one_step":
+    {"torque": ["-7/5", "47/10", "-3/10"], "force": ["11/5", "2/5", "1"]},
+    "composed_p": ["1/2", "0", "2"],
+    "composed_R": [["4/5", "-3/5", "0"], ["3/5", "4/5", "0"], ["0", "0", "1"]]},
+   "R2": [["4/5", "-3/5", "0"], ["3/5", "4/5", "0"], ["0", "0", "1"]],
+   "R1": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]]},
+  {"tip_wrench": {"torque": ["2", "-1", "1/3"], "force": ["-1", "3", "1/2"]},
+   "sensor_twist": {"v": ["-1/2", "2", "1"], "omega": ["1/2", "-1", "3"]},
+   "p2": ["0", "3/4", "-2"],
+   "p1": ["1", "-1/2", "2"],
+   "name": "chain_345_then_51213",
+   "expected":
+   {"tip_twist_two_steps":
+    {"v": ["53/65", "17/5", "539/260"], "omega": ["-87/65", "-11/10", "35/13"]},
+    "tip_twist_one_step":
+    {"v": ["53/65", "17/5", "539/260"], "omega": ["-87/65", "-11/10", "35/13"]},
+    "sensor_wrench_two_steps":
+    {"torque": ["883/390", "-21/260", "89/104"],
+     "force": ["-31/13", "51/26", "11/13"]},
+    "sensor_wrench_one_step":
+    {"torque": ["883/390", "-21/260", "89/104"],
+     "force": ["-31/13", "51/26", "11/13"]},
+    "composed_p": ["11/20", "1/10", "0"],
+    "composed_R":
+    [["48/65", "-3/5", "4/13"],
+     ["36/65", "4/5", "3/13"],
+     ["-5/13", "0", "12/13"]]},
+   "R2": [["12/13", "0", "5/13"], ["0", "1", "0"], ["-5/13", "0", "12/13"]],
+   "R1": [["4/5", "-3/5", "0"], ["3/5", "4/5", "0"], ["0", "0", "1"]]},
+  {"tip_wrench": {"torque": ["1/2", "0", "-3/2"], "force": ["0", "2", "-1"]},
+   "sensor_twist": {"v": ["1/2", "-1", "0"], "omega": ["0", "2", "-1/2"]},
+   "p2": ["0", "0", "-3"],
+   "p1": ["-2", "1", "1/2"],
+   "name": "chain_half_turn_then_quarter_turn",
+   "expected":
+   {"tip_twist_two_steps":
+    {"v": ["0", "-8", "-4"], "omega": ["-2", "0", "1/2"]},
+    "tip_twist_one_step": {"v": ["0", "-8", "-4"], "omega": ["-2", "0", "1/2"]},
+    "sensor_wrench_two_steps":
+    {"torque": ["1", "-11/2", "7/2"], "force": ["-2", "0", "1"]},
+    "sensor_wrench_one_step":
+    {"torque": ["1", "-11/2", "7/2"], "force": ["-2", "0", "1"]},
+    "composed_p": ["-2", "1", "7/2"],
+    "composed_R": [["0", "-1", "0"], ["-1", "0", "0"], ["0", "0", "-1"]]},
+   "R2": [["0", "-1", "0"], ["1", "0", "0"], ["0", "0", "1"]],
+   "R1": [["1", "0", "0"], ["0", "-1", "0"], ["0", "0", "-1"]]}],
  "cases":
  [{"tip_wrench": {"torque": ["0", "1/2", "0"], "force": ["1", "0", "-2"]},
+   "tip_twist": {"v": ["0", "1/2", "0"], "omega": ["1", "0", "0"]},
    "sensor_twist": {"v": ["1/4", "0", "0"], "omega": ["0", "0", "-1"]},
    "p": ["0", "0", "0"],
    "name": "identity_no_offset",
@@ -11,12 +71,15 @@
    {"virtual_work_tip_frame": "1/4",
     "virtual_work_sensor_frame": "1/4",
     "tip_velocity_in_sensor_frame": ["1/4", "0", "0"],
-    "tip_twist": {"v": ["1/4", "0", "0"], "omega": ["0", "0", "-1"]},
+    "tip_twist_from_sensor":
+    {"v": ["1/4", "0", "0"], "omega": ["0", "0", "-1"]},
     "sensor_wrench": {"torque": ["0", "1/2", "0"], "force": ["1", "0", "-2"]},
+    "sensor_twist_from_tip": {"v": ["0", "1/2", "0"], "omega": ["1", "0", "0"]},
     "sensor_to_tip_wrench":
     {"torque": ["0", "1/2", "0"], "force": ["1", "0", "-2"]}},
    "R": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]]},
   {"tip_wrench": {"torque": ["0", "0", "0"], "force": ["1", "0", "0"]},
+   "tip_twist": {"v": ["0", "0", "0"], "omega": ["0", "1", "0"]},
    "sensor_twist": {"v": ["0", "0", "0"], "omega": ["0", "1", "0"]},
    "p": ["0", "0", "10"],
    "name": "pure_translation_lever_arm",
@@ -24,12 +87,14 @@
    {"virtual_work_tip_frame": "10",
     "virtual_work_sensor_frame": "10",
     "tip_velocity_in_sensor_frame": ["10", "0", "0"],
-    "tip_twist": {"v": ["10", "0", "0"], "omega": ["0", "1", "0"]},
+    "tip_twist_from_sensor": {"v": ["10", "0", "0"], "omega": ["0", "1", "0"]},
     "sensor_wrench": {"torque": ["0", "10", "0"], "force": ["1", "0", "0"]},
+    "sensor_twist_from_tip": {"v": ["-10", "0", "0"], "omega": ["0", "1", "0"]},
     "sensor_to_tip_wrench":
     {"torque": ["0", "0", "0"], "force": ["1", "0", "0"]}},
    "R": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]]},
   {"tip_wrench": {"torque": ["1/4", "0", "-3/4"], "force": ["2", "-1", "1/2"]},
+   "tip_twist": {"v": ["-1/3", "2", "1/2"], "omega": ["3/4", "-1", "0"]},
    "sensor_twist": {"v": ["1", "1", "0"], "omega": ["-1/2", "1/3", "2"]},
    "p": ["3/2", "-5/4", "2"],
    "name": "identity_general_offset",
@@ -37,13 +102,17 @@
    {"virtual_work_tip_frame": "85/48",
     "virtual_work_sensor_frame": "85/48",
     "tip_velocity_in_sensor_frame": ["25/6", "5", "1/8"],
-    "tip_twist": {"v": ["25/6", "5", "1/8"], "omega": ["-1/2", "1/3", "2"]},
+    "tip_twist_from_sensor":
+    {"v": ["25/6", "5", "1/8"], "omega": ["-1/2", "1/3", "2"]},
     "sensor_wrench":
     {"torque": ["13/8", "13/4", "1/4"], "force": ["2", "-1", "1/2"]},
+    "sensor_twist_from_tip":
+    {"v": ["5/3", "7/2", "-1/16"], "omega": ["3/4", "-1", "0"]},
     "sensor_to_tip_wrench":
     {"torque": ["1/4", "0", "-3/4"], "force": ["2", "-1", "1/2"]}},
    "R": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]]},
   {"tip_wrench": {"torque": ["0", "1", "0"], "force": ["1", "0", "0"]},
+   "tip_twist": {"v": ["1", "0", "0"], "omega": ["0", "-1", "0"]},
    "sensor_twist": {"v": ["0", "1", "0"], "omega": ["1", "0", "0"]},
    "p": ["0", "0", "0"],
    "name": "quarter_turn_z",
@@ -51,12 +120,14 @@
    {"virtual_work_tip_frame": "0",
     "virtual_work_sensor_frame": "0",
     "tip_velocity_in_sensor_frame": ["0", "1", "0"],
-    "tip_twist": {"v": ["1", "0", "0"], "omega": ["0", "-1", "0"]},
+    "tip_twist_from_sensor": {"v": ["1", "0", "0"], "omega": ["0", "-1", "0"]},
     "sensor_wrench": {"torque": ["-1", "0", "0"], "force": ["0", "1", "0"]},
+    "sensor_twist_from_tip": {"v": ["0", "1", "0"], "omega": ["1", "0", "0"]},
     "sensor_to_tip_wrench":
     {"torque": ["0", "1", "0"], "force": ["1", "0", "0"]}},
    "R": [["0", "-1", "0"], ["1", "0", "0"], ["0", "0", "1"]]},
   {"tip_wrench": {"torque": ["1/2", "-1/2", "1/2"], "force": ["0", "2", "-1"]},
+   "tip_twist": {"v": ["0", "1", "-1/2"], "omega": ["0", "-1", "0"]},
    "sensor_twist": {"v": ["-1", "0", "0"], "omega": ["0", "-1", "0"]},
    "p": ["0", "0", "-3/2"],
    "name": "half_turn_x",
@@ -64,13 +135,16 @@
    {"virtual_work_tip_frame": "-1/2",
     "virtual_work_sensor_frame": "-1/2",
     "tip_velocity_in_sensor_frame": ["1/2", "0", "0"],
-    "tip_twist": {"v": ["1/2", "0", "0"], "omega": ["0", "1", "0"]},
+    "tip_twist_from_sensor": {"v": ["1/2", "0", "0"], "omega": ["0", "1", "0"]},
     "sensor_wrench":
     {"torque": ["-5/2", "1/2", "-1/2"], "force": ["0", "-2", "1"]},
+    "sensor_twist_from_tip":
+    {"v": ["3/2", "-1", "1/2"], "omega": ["0", "1", "0"]},
     "sensor_to_tip_wrench":
     {"torque": ["1/2", "-1/2", "1/2"], "force": ["0", "2", "-1"]}},
    "R": [["1", "0", "0"], ["0", "-1", "0"], ["0", "0", "-1"]]},
   {"tip_wrench": {"torque": ["0", "0", "1/3"], "force": ["3", "-1", "2"]},
+   "tip_twist": {"v": ["1/2", "0", "-1/2"], "omega": ["0", "0", "-1"]},
    "sensor_twist": {"v": ["0", "1/2", "1/2"], "omega": ["-1", "0", "0"]},
    "p": ["1", "0", "0"],
    "name": "quarter_turn_y",
@@ -78,12 +152,16 @@
    {"virtual_work_tip_frame": "-7/3",
     "virtual_work_sensor_frame": "-7/3",
     "tip_velocity_in_sensor_frame": ["0", "1/2", "1/2"],
-    "tip_twist": {"v": ["-1/2", "1/2", "0"], "omega": ["0", "0", "-1"]},
+    "tip_twist_from_sensor":
+    {"v": ["-1/2", "1/2", "0"], "omega": ["0", "0", "-1"]},
     "sensor_wrench": {"torque": ["1/3", "3", "-1"], "force": ["2", "-1", "-3"]},
+    "sensor_twist_from_tip":
+    {"v": ["-1/2", "0", "-1/2"], "omega": ["-1", "0", "0"]},
     "sensor_to_tip_wrench":
     {"torque": ["0", "0", "1/3"], "force": ["3", "-1", "2"]}},
    "R": [["0", "0", "1"], ["0", "1", "0"], ["-1", "0", "0"]]},
   {"tip_wrench": {"torque": ["0", "0", "1"], "force": ["1", "1", "0"]},
+   "tip_twist": {"v": ["0", "1", "0"], "omega": ["0", "0", "3"]},
    "sensor_twist": {"v": ["1/2", "1/2", "0"], "omega": ["0", "0", "3"]},
    "p": ["0", "0", "0"],
    "name": "rotation_345_z_no_offset",
@@ -91,12 +169,16 @@
    {"virtual_work_tip_frame": "19/5",
     "virtual_work_sensor_frame": "19/5",
     "tip_velocity_in_sensor_frame": ["1/2", "1/2", "0"],
-    "tip_twist": {"v": ["7/10", "1/10", "0"], "omega": ["0", "0", "3"]},
+    "tip_twist_from_sensor":
+    {"v": ["7/10", "1/10", "0"], "omega": ["0", "0", "3"]},
     "sensor_wrench": {"torque": ["0", "0", "1"], "force": ["1/5", "7/5", "0"]},
+    "sensor_twist_from_tip":
+    {"v": ["-3/5", "4/5", "0"], "omega": ["0", "0", "3"]},
     "sensor_to_tip_wrench":
     {"torque": ["0", "0", "1"], "force": ["1", "1", "0"]}},
    "R": [["4/5", "-3/5", "0"], ["3/5", "4/5", "0"], ["0", "0", "1"]]},
   {"tip_wrench": {"torque": ["0", "1/2", "0"], "force": ["1", "0", "-2"]},
+   "tip_twist": {"v": ["1", "0", "-1/4"], "omega": ["0", "0", "-1"]},
    "sensor_twist": {"v": ["1/4", "-1/4", "0"], "omega": ["0", "0", "-1"]},
    "p": ["1", "2", "-1/2"],
    "name": "rotation_345_z_with_offset",
@@ -104,13 +186,17 @@
    {"virtual_work_tip_frame": "21/20",
     "virtual_work_sensor_frame": "21/20",
     "tip_velocity_in_sensor_frame": ["9/4", "-5/4", "0"],
-    "tip_twist": {"v": ["21/20", "-47/20", "0"], "omega": ["0", "0", "-1"]},
+    "tip_twist_from_sensor":
+    {"v": ["21/20", "-47/20", "0"], "omega": ["0", "0", "-1"]},
     "sensor_wrench":
     {"torque": ["-4", "2", "-1"], "force": ["4/5", "3/5", "-2"]},
+    "sensor_twist_from_tip":
+    {"v": ["-6/5", "8/5", "-1/4"], "omega": ["0", "0", "-1"]},
     "sensor_to_tip_wrench":
     {"torque": ["0", "1/2", "0"], "force": ["1", "0", "-2"]}},
    "R": [["4/5", "-3/5", "0"], ["3/5", "4/5", "0"], ["0", "0", "1"]]},
   {"tip_wrench": {"torque": ["2/3", "-1", "1/3"], "force": ["-1", "2", "3"]},
+   "tip_twist": {"v": ["-1/2", "0", "1/2"], "omega": ["3/2", "0", "0"]},
    "sensor_twist": {"v": ["0", "-1/2", "1/2"], "omega": ["3/2", "0", "0"]},
    "p": ["-1/3", "2/3", "1"],
    "name": "rotation_345_z_reversed",
@@ -118,13 +204,17 @@
    {"virtual_work_tip_frame": "0",
     "virtual_work_sensor_frame": "0",
     "tip_velocity_in_sensor_frame": ["0", "-2", "3/2"],
-    "tip_twist": {"v": ["6/5", "-8/5", "3/2"], "omega": ["6/5", "9/10", "0"]},
+    "tip_twist_from_sensor":
+    {"v": ["6/5", "-8/5", "3/2"], "omega": ["6/5", "9/10", "0"]},
     "sensor_wrench":
     {"torque": ["-4/15", "1/5", "-2/3"], "force": ["2/5", "11/5", "3"]},
+    "sensor_twist_from_tip":
+    {"v": ["1/2", "3/2", "0"], "omega": ["6/5", "-9/10", "0"]},
     "sensor_to_tip_wrench":
     {"torque": ["2/3", "-1", "1/3"], "force": ["-1", "2", "3"]}},
    "R": [["4/5", "3/5", "0"], ["-3/5", "4/5", "0"], ["0", "0", "1"]]},
   {"tip_wrench": {"torque": ["0", "0", "-2"], "force": ["3", "-2", "1"]},
+   "tip_twist": {"v": ["1", "0", "0"], "omega": ["1", "-1", "0"]},
    "sensor_twist": {"v": ["0", "0", "1"], "omega": ["1", "-1", "0"]},
    "p": ["0", "1/4", "3"],
    "name": "rotation_5_12_13_y",
@@ -132,15 +222,19 @@
    {"virtual_work_tip_frame": "-235/52",
     "virtual_work_sensor_frame": "-235/52",
     "tip_velocity_in_sensor_frame": ["-3", "-3", "5/4"],
-    "tip_twist": {"v": ["-13/4", "-3", "0"], "omega": ["12/13", "-1", "5/13"]},
+    "tip_twist_from_sensor":
+    {"v": ["-13/4", "-3", "0"], "omega": ["12/13", "-1", "5/13"]},
     "sensor_wrench":
     {"torque": ["269/52", "123/13", "-137/52"],
      "force": ["41/13", "-2", "-3/13"]},
+    "sensor_twist_from_tip":
+    {"v": ["199/52", "36/13", "-8/13"], "omega": ["12/13", "-1", "-5/13"]},
     "sensor_to_tip_wrench":
     {"torque": ["0", "0", "-2"], "force": ["3", "-2", "1"]}},
    "R": [["12/13", "0", "5/13"], ["0", "1", "0"], ["-5/13", "0", "12/13"]]},
   {"tip_wrench":
    {"torque": ["1/2", "-1/2", "1/2"], "force": ["1/2", "1/2", "1/2"]},
+   "tip_twist": {"v": ["2", "-1/4", "3/4"], "omega": ["0", "0", "-3/2"]},
    "sensor_twist": {"v": ["2", "-1", "0"], "omega": ["0", "0", "-3/2"]},
    "p": ["-2", "0", "1/3"],
    "name": "rotation_8_15_17_x",
@@ -148,14 +242,17 @@
    {"virtual_work_tip_frame": "75/68",
     "virtual_work_sensor_frame": "75/68",
     "tip_velocity_in_sensor_frame": ["2", "2", "0"],
-    "tip_twist":
+    "tip_twist_from_sensor":
     {"v": ["2", "30/17", "-16/17"], "omega": ["0", "-12/17", "-45/34"]},
     "sensor_wrench":
     {"torque": ["22/51", "43/51", "-7/34"], "force": ["1/2", "7/34", "23/34"]},
+    "sensor_twist_from_tip":
+    {"v": ["30/17", "-219/68", "-59/68"], "omega": ["0", "12/17", "-45/34"]},
     "sensor_to_tip_wrench":
     {"torque": ["1/2", "-1/2", "1/2"], "force": ["1/2", "1/2", "1/2"]}},
    "R": [["1", "0", "0"], ["0", "15/17", "-8/17"], ["0", "8/17", "15/17"]]},
   {"tip_wrench": {"torque": ["1", "-1", "1"], "force": ["-3", "1", "2"]},
+   "tip_twist": {"v": ["0", "1", "-1"], "omega": ["3/2", "-1", "1"]},
    "sensor_twist": {"v": ["1/3", "1/3", "1/3"], "omega": ["-1", "2", "-1/2"]},
    "p": ["1/2", "-1/2", "5/2"],
    "name": "compound_z_then_y",
@@ -163,12 +260,15 @@
    {"virtual_work_tip_frame": "-11437/780",
     "virtual_work_sensor_frame": "-11437/780",
     "tip_velocity_in_sensor_frame": ["61/12", "31/12", "-1/6"],
-    "tip_twist":
+    "tip_twist_from_sensor":
     {"v": ["2047/390", "-59/60", "313/156"],
      "omega": ["73/130", "11/5", "-4/13"]},
     "sensor_wrench":
     {"torque": ["149/130", "-456/65", "-99/130"],
      "force": ["-11/5", "-2/5", "3"]},
+    "sensor_twist_from_tip":
+    {"v": ["-451/260", "1413/260", "14/65"],
+     "omega": ["131/65", "17/65", "9/26"]},
     "sensor_to_tip_wrench":
     {"torque": ["1", "-1", "1"], "force": ["-3", "1", "2"]}},
    "R":
@@ -176,6 +276,7 @@
     ["36/65", "4/5", "3/13"],
     ["-5/13", "0", "12/13"]]},
   {"tip_wrench": {"torque": ["-1", "1/2", "2"], "force": ["5", "-4", "3"]},
+   "tip_twist": {"v": ["1", "1/2", "0"], "omega": ["-2", "1", "1/2"]},
    "sensor_twist": {"v": ["-1/2", "2", "1"], "omega": ["1/2", "-1/2", "1/2"]},
    "p": ["3", "-1", "2"],
    "name": "compound_x_y_z",
@@ -183,12 +284,15 @@
    {"virtual_work_tip_frame": "-26771/4420",
     "virtual_work_sensor_frame": "-26771/4420",
     "tip_velocity_in_sensor_frame": ["-1", "5/2", "2"],
-    "tip_twist":
+    "tip_twist_from_sensor":
     {"v": ["2141/2210", "3544/1105", "35/221"],
      "omega": ["83/2210", "-631/2210", "361/442"]},
     "sensor_wrench":
     {"torque": ["242/1105", "13643/1105", "1361/170"],
      "force": ["459/65", "-71/221", "196/1105"]},
+    "sensor_twist_from_tip":
+    {"v": ["1583/1105", "-6189/1105", "-4909/1105"],
+     "omega": ["-239/130", "-214/221", "1067/1105"]},
     "sensor_to_tip_wrench":
     {"torque": ["-1", "1/2", "2"], "force": ["5", "-4", "3"]}},
    "R":
@@ -196,6 +300,7 @@
     ["149/221", "132/221", "-96/221"],
     ["12/1105", "641/1105", "180/221"]]},
   {"tip_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+   "tip_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
    "sensor_twist": {"v": ["1", "2", "3"], "omega": ["3", "2", "1"]},
    "p": ["1", "1", "1"],
    "name": "zero_wrench",
@@ -203,12 +308,15 @@
    {"virtual_work_tip_frame": "0",
     "virtual_work_sensor_frame": "0",
     "tip_velocity_in_sensor_frame": ["2", "0", "4"],
-    "tip_twist": {"v": ["8/5", "-6/5", "4"], "omega": ["18/5", "-1/5", "1"]},
+    "tip_twist_from_sensor":
+    {"v": ["8/5", "-6/5", "4"], "omega": ["18/5", "-1/5", "1"]},
     "sensor_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "sensor_twist_from_tip": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
     "sensor_to_tip_wrench":
     {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]}},
    "R": [["4/5", "-3/5", "0"], ["3/5", "4/5", "0"], ["0", "0", "1"]]},
   {"tip_wrench": {"torque": ["1/2", "1/2", "-1/2"], "force": ["1", "-1", "2"]},
+   "tip_twist": {"v": ["2", "1", "1"], "omega": ["-1/2", "1/2", "1"]},
    "sensor_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
    "p": ["-1", "2", "-2"],
    "name": "zero_twist",
@@ -216,10 +324,12 @@
    {"virtual_work_tip_frame": "0",
     "virtual_work_sensor_frame": "0",
     "tip_velocity_in_sensor_frame": ["0", "0", "0"],
-    "tip_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+    "tip_twist_from_sensor": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
     "sensor_wrench":
     {"torque": ["31/26", "-37/26", "-79/26"],
      "force": ["22/13", "-1", "19/13"]},
+    "sensor_twist_from_tip":
+    {"v": ["71/13", "59/26", "-5/26"], "omega": ["-1/13", "1/2", "29/26"]},
     "sensor_to_tip_wrench":
     {"torque": ["1/2", "1/2", "-1/2"], "force": ["1", "-1", "2"]}},
    "R": [["12/13", "0", "5/13"], ["0", "1", "0"], ["-5/13", "0", "12/13"]]}]}

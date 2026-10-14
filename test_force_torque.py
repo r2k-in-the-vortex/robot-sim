@@ -12,8 +12,14 @@ drift.
 
 The transforms themselves are not implemented in Python yet (``kinematics.py`` has no
 sensor frame). When they are, this module is where they get checked: recompute the
-``expected`` blocks from the inputs of each case and assert equality with what Lean
+``expected`` blocks of each case from its inputs and assert equality with what Lean
 computed, using the helpers here for the row-major convention.
+
+What is checked now is that the data is internally consistent -- the properties
+``TorqueWrench`` proves, re-derived here from the stored numbers. Two of those are
+convention-sensitive and worth stating: the chains check that folding two frames as
+``p1 + R1 @ p2`` agrees with converting twice, and that the routes agree in both
+directions.
 """
 
 from __future__ import annotations
@@ -22,6 +28,13 @@ import json
 import unittest
 from fractions import Fraction
 from pathlib import Path
+
+#: The blocks of a case that hold numbers: the rest (names, source, conventions) is prose.
+CASE_NUMERIC_BLOCKS = ("p", "R", "tip_wrench", "sensor_twist", "tip_twist", "expected")
+
+#: The same for a chain.
+CHAIN_NUMERIC_BLOCKS = ("p1", "R1", "p2", "R2", "tip_wrench", "sensor_twist", "expected")
+
 
 def load_document() -> dict:
 	"""Return the ground-truth document, parsed from JSON."""
@@ -81,6 +94,10 @@ def mat_mul(
 	)
 
 
+def add(left, right):
+	return tuple(a + b for a, b in zip(left, right))
+
+
 def identity() -> tuple[tuple[Fraction, ...], ...]:
 	return tuple(
 		tuple(Fraction(1) if row == column else Fraction(0) for column in range(3))
@@ -99,15 +116,10 @@ def virtual_work(wrench_block, twist_block) -> Fraction:
 	return dot(force, linear) + dot(torque, angular)
 
 
-#: The blocks of a case that hold numbers. Everything else (case names, the source and
-#: conventions strings) is prose.
-NUMERIC_BLOCKS = ("p", "R", "tip_wrench", "sensor_twist", "expected")
-
-
-def numerals(document) -> list[str]:
-	"""Every string leaf of the numeric blocks, i.e. every numeral the document stores."""
+def numerals(entries) -> list[str]:
+	"""Every string leaf of the given blocks, i.e. every numeral they store."""
 	found: list[str] = []
-	pending = [case[key] for case in document["cases"] for key in NUMERIC_BLOCKS]
+	pending = list(entries)
 	while pending:
 		item = pending.pop()
 		if isinstance(item, str):
@@ -128,21 +140,32 @@ class ForceTorqueGroundTruthTests(unittest.TestCase):
 	def setUpClass(cls) -> None:
 		cls.document = load_document()
 		cls.cases = cls.document["cases"]
+		cls.chains = cls.document["chains"]
 
 	def test_document_declares_a_supported_schema(self) -> None:
-		self.assertEqual(self.document["schema_version"], 1)
+		self.assertEqual(self.document["schema_version"], 2)
 		self.assertTrue(self.cases, "the ground-truth file has no cases")
+		self.assertTrue(self.chains, "the ground-truth file has no chains")
 
 	def test_every_numeral_is_exact(self) -> None:
-		for text in numerals(self.document):
+		blocks = [
+			case[key] for case in self.cases for key in CASE_NUMERIC_BLOCKS
+		] + [chain[key] for chain in self.chains for key in CHAIN_NUMERIC_BLOCKS]
+		for text in numerals(blocks):
 			with self.subTest(numeral=text):
 				exact(text)
 
 	def test_rotation_blocks_are_orthogonal(self) -> None:
 		"""``R`` has to be a rotation for the cases to mean anything physically."""
-		for case in self.cases:
-			with self.subTest(case=case["name"]):
-				rotation = matrix(case["R"])
+		rotations = [(case["name"], matrix(case["R"])) for case in self.cases]
+		rotations += [(chain["name"] + " R1", matrix(chain["R1"])) for chain in self.chains]
+		rotations += [(chain["name"] + " R2", matrix(chain["R2"])) for chain in self.chains]
+		rotations += [
+			(chain["name"] + " composed_R", matrix(chain["expected"]["composed_R"]))
+			for chain in self.chains
+		]
+		for name, rotation in rotations:
+			with self.subTest(rotation=name):
 				self.assertEqual(mat_mul(transpose(rotation), rotation), identity())
 				self.assertEqual(mat_mul(rotation, transpose(rotation)), identity())
 
@@ -167,7 +190,9 @@ class ForceTorqueGroundTruthTests(unittest.TestCase):
 				)
 				self.assertEqual(
 					exact(expected["virtual_work_tip_frame"]),
-					virtual_work(wrench(case["tip_wrench"]), twist(expected["tip_twist"])),
+					virtual_work(
+						wrench(case["tip_wrench"]), twist(expected["tip_twist_from_sensor"])
+					),
 				)
 
 	def test_sensor_to_tip_recovers_the_applied_wrench(self) -> None:
@@ -194,17 +219,51 @@ class ForceTorqueGroundTruthTests(unittest.TestCase):
 				)
 				shifted_force, shifted_torque = wrench(case["expected"]["sensor_wrench"])
 				self.assertEqual(shifted_force, force)
-				self.assertEqual(
-					shifted_torque, tuple(a + b for a, b in zip(torque, lever_arm))
-				)
+				self.assertEqual(shifted_torque, add(torque, lever_arm))
 
 	def test_identity_case_is_the_identity_transform(self) -> None:
+		"""With ``R = 1`` and ``p = 0`` every direction has to return its input."""
 		for case in self.cases:
 			if case["name"] != "identity_no_offset":
 				continue
 			with self.subTest(case=case["name"]):
-				self.assertEqual(wrench(case["expected"]["sensor_wrench"]), wrench(case["tip_wrench"]))
-				self.assertEqual(twist(case["expected"]["tip_twist"]), twist(case["sensor_twist"]))
+				expected = case["expected"]
+				self.assertEqual(wrench(expected["sensor_wrench"]), wrench(case["tip_wrench"]))
+				self.assertEqual(wrench(expected["sensor_to_tip_wrench"]), wrench(case["tip_wrench"]))
+				self.assertEqual(
+					twist(expected["tip_twist_from_sensor"]), twist(case["sensor_twist"])
+				)
+				self.assertEqual(
+					twist(expected["sensor_twist_from_tip"]), twist(case["tip_twist"])
+				)
+
+	def test_chains_fold_the_pose_the_way_the_theorem_says(self) -> None:
+		"""``(p1, R1)`` then ``(p2, R2)`` is ``p1 + R1 @ p2`` with ``R1 * R2``."""
+		for chain in self.chains:
+			with self.subTest(chain=chain["name"]):
+				expected = chain["expected"]
+				self.assertEqual(
+					vector(expected["composed_p"]),
+					add(vector(chain["p1"]), mat_vec(matrix(chain["R1"]), vector(chain["p2"]))),
+				)
+				self.assertEqual(
+					matrix(expected["composed_R"]),
+					mat_mul(matrix(chain["R1"]), matrix(chain["R2"])),
+				)
+
+	def test_chain_routes_agree(self) -> None:
+		"""One step with the folded pose equals two steps through the middle frame."""
+		for chain in self.chains:
+			with self.subTest(chain=chain["name"]):
+				expected = chain["expected"]
+				self.assertEqual(
+					wrench(expected["sensor_wrench_one_step"]),
+					wrench(expected["sensor_wrench_two_steps"]),
+				)
+				self.assertEqual(
+					twist(expected["tip_twist_one_step"]),
+					twist(expected["tip_twist_two_steps"]),
+				)
 
 
 if __name__ == "__main__":
