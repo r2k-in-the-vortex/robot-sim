@@ -173,6 +173,9 @@ class RobotArmSimulator:
 		self._last_mouse_position: tuple[float, float] | None = None
 		self._camera_initialized = False
 		self.parameters = self._to_dh_parameters(DEFAULT_DH_VALUES)
+		# Runtime joint angles are held here at full precision; the entry fields and
+		# front readouts only ever render them at display precision.
+		self.joint_angles_degrees: tuple[float, ...] = (0.0,) * 6
 		self.mesh_settings = self._default_mesh_settings()
 		self.show_mesh_edges = tk.BooleanVar(master=self.root, value=False)
 		self.show_joint_labels = tk.BooleanVar(master=self.root, value=True)
@@ -295,7 +298,7 @@ class RobotArmSimulator:
 		transform = forward_kinematics(self.parameters)[-1]
 		tool_position = frame_origin(transform)
 		roll, pitch, yaw = _rotation_to_rpy_degrees(transform)
-		joint_angles = self._read_joint_angle_values()
+		joint_angles = self.joint_angles_degrees
 		clipboard_text = "\n".join((
 			"T6 position (model units):",
 			f"X: {tool_position[0]:.15g}",
@@ -313,6 +316,7 @@ class RobotArmSimulator:
 		self.jog_status_label.configure(text="Copied T6 pose and joint angles")
 
 	def _sync_joint_angle_views(self, joint_angles_degrees: tuple[float, ...]) -> None:
+		"""Render joint angles into the entry fields and front readouts."""
 		for entry, angle, display_var in zip(
 			self.joint_angle_entries, joint_angles_degrees, self.front_joint_angle_vars
 		):
@@ -323,13 +327,14 @@ class RobotArmSimulator:
 	def _jog_joint(self, joint_index: int, direction: int) -> None:
 		try:
 			static_values = self._read_entry_values()
-			joint_angles = list(self._read_joint_angle_values())
+			joint_angles = list(self.joint_angles_degrees)
 			step = self._read_step(self.joint_step_entry, "Joint step must be a finite positive angle.")
 		except ValueError as error:
 			self.jog_status_label.configure(text=str(error))
 			return
 		joint_angles[joint_index] += direction * step
 		updated_angles = tuple(joint_angles)
+		self.joint_angles_degrees = updated_angles
 		self._sync_joint_angle_views(updated_angles)
 		self.parameters = self._to_dh_parameters(static_values, updated_angles)
 		self._render_scene()
@@ -340,7 +345,9 @@ class RobotArmSimulator:
 		static_values: tuple[tuple[float, float, float, float], ...],
 		joint_angles_radians: tuple[float, ...],
 	) -> None:
+		"""Store a solved pose at full precision and refresh the views from it."""
 		joint_angles_degrees = tuple(math.degrees(angle) for angle in joint_angles_radians)
+		self.joint_angles_degrees = joint_angles_degrees
 		self._sync_joint_angle_views(joint_angles_degrees)
 		self.parameters = self._to_dh_parameters(static_values, joint_angles_degrees)
 		self._render_scene()
@@ -368,7 +375,7 @@ class RobotArmSimulator:
 		"""
 		try:
 			static_values = self._read_entry_values()
-			joint_angles_degrees = self._read_joint_angle_values()
+			joint_angles_degrees = self.joint_angles_degrees
 			step = self._read_step(step_entry, step_error)
 			geometry = self._to_dh_parameters(static_values)
 			current_pose = forward_kinematics(
@@ -603,9 +610,19 @@ class RobotArmSimulator:
 		return self._to_dh_parameters(self._read_entry_values(), self._read_joint_angle_values())
 
 	def _read_joint_angle_values(self) -> tuple[float, ...]:
-		joint_angles = tuple(float(entry.get()) for entry in self.joint_angle_entries)
-		if len(joint_angles) != 6:
+		"""Return the runtime joint angles the entry fields ask for.
+
+		A field still showing the rendering of the current angle yields that angle
+		at full precision, so applying an edit to one joint does not round the
+		others down to display precision. A field the user retyped is taken at
+		face value.
+		"""
+		if len(self.joint_angle_entries) != 6 or len(self.joint_angles_degrees) != 6:
 			raise ValueError("Exactly six runtime joint angles are required.")
+		joint_angles = tuple(
+			current if entry.get() == self._format_value(current) else float(entry.get())
+			for entry, current in zip(self.joint_angle_entries, self.joint_angles_degrees)
+		)
 		if not all(math.isfinite(value) for value in joint_angles):
 			raise ValueError("All runtime joint angles must be finite numbers.")
 		return joint_angles
@@ -647,14 +664,16 @@ class RobotArmSimulator:
 
 	def _apply_from_entries(self) -> bool:
 		try:
-			parameters = self._read_entry_parameters()
+			joint_angles = self._read_joint_angle_values()
+			parameters = self._to_dh_parameters(self._read_entry_values(), joint_angles)
 			mesh_settings = self._read_mesh_entries()
 		except ValueError as error:
 			messagebox.showerror("Invalid parameters", str(error), parent=self.root)
 			return False
+		self.joint_angles_degrees = joint_angles
 		self.parameters = parameters
 		self.mesh_settings = mesh_settings
-		self._sync_joint_angle_views(self._read_joint_angle_values())
+		self._sync_joint_angle_views(joint_angles)
 		self._render_scene()
 		return True
 
@@ -683,7 +702,7 @@ class RobotArmSimulator:
 		except OSError as error:
 			messagebox.showerror("Could not save parameters", str(error), parent=self.root)
 			return
-		joint_angles = self._read_joint_angle_values()
+		joint_angles = self.joint_angles_degrees
 		self.parameters = self._to_dh_parameters(values, joint_angles)
 		self._sync_joint_angle_views(joint_angles)
 		self.mesh_settings = mesh_settings
@@ -795,7 +814,7 @@ class RobotArmSimulator:
 			return
 		self._populate_dh_entries(values)
 		self._populate_mesh_entries(mesh_settings)
-		joint_angles = self._read_joint_angle_values()
+		joint_angles = self.joint_angles_degrees
 		self.parameters = self._to_dh_parameters(values, joint_angles)
 		self._sync_joint_angle_views(joint_angles)
 		self.mesh_settings = mesh_settings

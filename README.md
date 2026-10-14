@@ -23,6 +23,10 @@ table separates each joint's static theta offset from its runtime joint angle.
 Runtime angles start at zero each time the application launches; **Apply to
 View** uses offset plus runtime angle for forward kinematics. Saving stores only
 the static theta offset and link dimensions, never the runtime joint position.
+Solves run on the runtime angles at full precision; the joint angle fields and
+the front readouts render them rounded, and a field left untouched keeps its
+exact value when an edit elsewhere is applied. **Copy XYZ** likewise copies the
+runtime angles unrounded.
 Older configuration files using `theta_deg` are read as static offsets. Each mesh
 can have a local XYZ offset and local X/Y/Z Euler rotations applied in that
 order, in degrees. Opacity ranges from 0 (transparent) to 1 (opaque). Use

@@ -308,9 +308,13 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			copied_position = tuple(float(copied_lines[index].split(": ", 1)[1]) for index in (1, 2, 3))
 			for actual, expected in zip(copied_position, frame_origin(end_pose)):
 				self.assertAlmostEqual(actual, expected, delta=1e-5)
+			# The clipboard carries the runtime angles at full precision, while the
+			# entry fields show them rounded, so compare against the stored angles
+			# and check the fields only agree to display precision.
 			copied_angles = tuple(float(copied_lines[index].split(": ", 1)[1]) for index in range(9, 15))
-			for actual, entry in zip(copied_angles, app.joint_angle_entries):
-				self.assertAlmostEqual(actual, float(entry.get()), delta=1e-10)
+			for actual, current, entry in zip(copied_angles, app.joint_angles_degrees, app.joint_angle_entries):
+				self.assertAlmostEqual(actual, current, delta=1e-12)
+				self.assertAlmostEqual(float(entry.get()), current, delta=1e-3)
 		finally:
 			app.root.destroy()
 
@@ -327,18 +331,16 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.assertTrue(app._apply_from_entries())
 			start_pose = forward_kinematics(app.parameters)[-1]
 
-			# Applied angles are written into the Spinboxes with six significant
-			# digits, so the pose the app recomputes carries about 1e-4 of
-			# quantization in position and 1e-6 in rotation. The tolerances below
-			# sit just above that floor; the moves asserted are 1e3 to 1e5 larger.
+			# Jogs run at full precision, so these land within the solver's own
+			# 1e-7 pose tolerance rather than within the fields' display rounding.
 			app._jog_tool_translation(2, 1)
 			self.assertEqual(app.jog_status_label.cget("text"), "Moved tool Z +1")
 			moved_pose = forward_kinematics(app.parameters)[-1]
 			for row in range(3):
 				for column in range(3):
-					self.assertAlmostEqual(moved_pose[row][column], start_pose[row][column], delta=1e-5)
+					self.assertAlmostEqual(moved_pose[row][column], start_pose[row][column], delta=1e-6)
 				self.assertAlmostEqual(
-					moved_pose[row][3] - start_pose[row][3], start_pose[row][2], delta=1e-3
+					moved_pose[row][3] - start_pose[row][3], start_pose[row][2], delta=1e-6
 				)
 
 			before_rotation = forward_kinematics(app.parameters)[-1]
@@ -346,13 +348,42 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.assertEqual(app.jog_status_label.cget("text"), "Rotated tool RX +5 deg")
 			turned_pose = forward_kinematics(app.parameters)[-1]
 			for actual, expected in zip(frame_origin(turned_pose), frame_origin(before_rotation)):
-				self.assertAlmostEqual(actual, expected, delta=1e-3)
+				self.assertAlmostEqual(actual, expected, delta=1e-6)
 			expected_rotation = rotate_pose_tool_axis(before_rotation, 0, math.radians(5.0))
 			for row in range(3):
 				for column in range(3):
 					self.assertAlmostEqual(
-						turned_pose[row][column], expected_rotation[row][column], delta=1e-5
+						turned_pose[row][column], expected_rotation[row][column], delta=1e-6
 					)
+		finally:
+			app.root.destroy()
+
+	def test_tk_editing_one_joint_keeps_the_other_angles_exact(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			app._jog_cartesian(1, 1)
+			solved_angles = app.joint_angles_degrees
+			displayed_angles = tuple(float(entry.get()) for entry in app.joint_angle_entries)
+			self.assertNotEqual(
+				displayed_angles, tuple(solved_angles),
+				"the jog was expected to land on angles the fields cannot show exactly",
+			)
+
+			edited_entry = app.joint_angle_entries[5]
+			edited_entry.delete(0, tk.END)
+			edited_entry.insert(0, "-12.5")
+			self.assertTrue(app._apply_from_entries())
+
+			self.assertEqual(app.joint_angles_degrees[5], -12.5)
+			for index in range(5):
+				self.assertEqual(
+					app.joint_angles_degrees[index], solved_angles[index],
+					f"applying an edit to J6 changed J{index + 1}",
+				)
 		finally:
 			app.root.destroy()
 
