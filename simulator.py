@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import tkinter as tk
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -71,6 +72,37 @@ def offset_pose_translation(
 	return tuple(tuple(row) for row in result)
 
 
+def offset_pose_tool_translation(
+	pose: tuple[tuple[float, ...], ...], axis: int, distance: float
+) -> tuple[tuple[float, ...], ...]:
+	"""Return a pose translated along one of the tool frame's own axes.
+
+	The tool axes are the columns of the pose's rotation block, so the offset
+	runs along a column rather than along a base axis. Orientation is preserved.
+	"""
+	if len(pose) != 4 or any(len(row) != 4 for row in pose):
+		raise ValueError("pose must be a 4x4 homogeneous transform")
+	if axis not in (0, 1, 2):
+		raise ValueError("axis must be 0 (X), 1 (Y), or 2 (Z)")
+	if not math.isfinite(distance):
+		raise ValueError("translation distance must be finite")
+	result = [list(row) for row in pose]
+	for row in range(3):
+		result[row][3] += pose[row][axis] * distance
+	return tuple(tuple(row) for row in result)
+
+
+def _axis_rotation(axis: int, angle: float) -> tuple[tuple[float, ...], ...]:
+	"""Return the rotation matrix about one coordinate axis."""
+	cosine = math.cos(angle)
+	sine = math.sin(angle)
+	if axis == 0:
+		return ((1.0, 0.0, 0.0), (0.0, cosine, -sine), (0.0, sine, cosine))
+	if axis == 1:
+		return ((cosine, 0.0, sine), (0.0, 1.0, 0.0), (-sine, 0.0, cosine))
+	return ((cosine, -sine, 0.0), (sine, cosine, 0.0), (0.0, 0.0, 1.0))
+
+
 def rotate_pose_world_axis(
 	pose: tuple[tuple[float, ...], ...], axis: int, angle: float
 ) -> tuple[tuple[float, ...], ...]:
@@ -81,18 +113,34 @@ def rotate_pose_world_axis(
 		raise ValueError("axis must be 0 (X), 1 (Y), or 2 (Z)")
 	if not math.isfinite(angle):
 		raise ValueError("rotation angle must be finite")
-	cosine = math.cos(angle)
-	sine = math.sin(angle)
-	if axis == 0:
-		rotation = ((1.0, 0.0, 0.0), (0.0, cosine, -sine), (0.0, sine, cosine))
-	elif axis == 1:
-		rotation = ((cosine, 0.0, sine), (0.0, 1.0, 0.0), (-sine, 0.0, cosine))
-	else:
-		rotation = ((cosine, -sine, 0.0), (sine, cosine, 0.0), (0.0, 0.0, 1.0))
+	rotation = _axis_rotation(axis, angle)
 	result = [list(row) for row in pose]
 	for row in range(3):
 		for column in range(3):
 			result[row][column] = sum(rotation[row][index] * pose[index][column] for index in range(3))
+	return tuple(tuple(row) for row in result)
+
+
+def rotate_pose_tool_axis(
+	pose: tuple[tuple[float, ...], ...], axis: int, angle: float
+) -> tuple[tuple[float, ...], ...]:
+	"""Rotate a pose about one of the tool frame's own axes, keeping its origin fixed.
+
+	Post-multiplying turns the pose about the axes it already carries, which is
+	what makes this the tool-frame counterpart of ``rotate_pose_world_axis``;
+	that one pre-multiplies to turn about the base axes instead.
+	"""
+	if len(pose) != 4 or any(len(row) != 4 for row in pose):
+		raise ValueError("pose must be a 4x4 homogeneous transform")
+	if axis not in (0, 1, 2):
+		raise ValueError("axis must be 0 (X), 1 (Y), or 2 (Z)")
+	if not math.isfinite(angle):
+		raise ValueError("rotation angle must be finite")
+	rotation = _axis_rotation(axis, angle)
+	result = [list(row) for row in pose]
+	for row in range(3):
+		for column in range(3):
+			result[row][column] = sum(pose[row][index] * rotation[index][column] for index in range(3))
 	return tuple(tuple(row) for row in result)
 
 
@@ -140,7 +188,7 @@ class RobotArmSimulator:
 		self.figure = Figure(figsize=(8, 6), facecolor="#f4f6f7")
 		self.axes: Axes = self.figure.add_subplot(111, projection="3d")
 		self.canvas = FigureCanvasTkAgg(self.figure, master=self.view_tab)
-		self._build_cartesian_jog_controls()
+		self._build_jog_controls()
 		pose_row = ttk.Frame(self.view_tab)
 		pose_row.pack(fill=tk.X)
 		self.pose_label = ttk.Label(pose_row, anchor=tk.W, padding=(4, 4))
@@ -175,56 +223,73 @@ class RobotArmSimulator:
 		canvas_widget.bind("<Button-4>", self._on_tk_mousewheel)
 		canvas_widget.bind("<Button-5>", self._on_tk_mousewheel)
 
-	def _build_cartesian_jog_controls(self) -> None:
+	def _build_jog_controls(self) -> None:
 		controls = ttk.Frame(self.view_tab, padding=(4, 1))
 		controls.pack(fill=tk.X)
-		self.jog_step_entry = ttk.Spinbox(controls, from_=0.001, to=1_000_000.0, increment=0.01, width=6)
+		steps = ttk.Frame(controls)
+		steps.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 4))
+		ttk.Label(steps, text="Jog step").grid(row=0, column=0, sticky=tk.W)
+		self.jog_step_entry = ttk.Spinbox(steps, from_=0.001, to=1_000_000.0, increment=0.01, width=6)
 		self.jog_step_entry.insert(0, "1")
-		self.jog_step_entry.grid(row=0, column=1, padx=(2, 5))
-		ttk.Label(controls, text="XYZ").grid(row=0, column=0, sticky=tk.W)
-		for axis, name in enumerate(("X", "Y", "Z")):
-			for direction, suffix in ((-1, "-"), (1, "+")):
-				column = 2 + axis * 2 + (1 if direction > 0 else 0)
-				ttk.Button(
-					controls, text=f"{name}{suffix}", width=3,
-					command=lambda axis=axis, direction=direction: self._jog_cartesian(axis, direction),
-				).grid(row=0, column=column, padx=1, pady=1)
-
-		ttk.Label(controls, text="Rot deg").grid(row=1, column=0, sticky=tk.W)
-		self.rotation_step_entry = ttk.Spinbox(controls, from_=0.1, to=360.0, increment=1.0, width=6)
+		self.jog_step_entry.grid(row=0, column=1, padx=(4, 16))
+		ttk.Label(steps, text="Rotation step").grid(row=0, column=2, sticky=tk.W)
+		self.rotation_step_entry = ttk.Spinbox(steps, from_=0.1, to=360.0, increment=1.0, width=6)
 		self.rotation_step_entry.insert(0, "5")
-		self.rotation_step_entry.grid(row=1, column=1, padx=(2, 5))
-		for axis, name in enumerate(("X", "Y", "Z")):
-			for direction, suffix in ((-1, "-"), (1, "+")):
-				column = 2 + axis * 2 + (1 if direction > 0 else 0)
-				ttk.Button(
-					controls, text=f"R{name}{suffix}", width=4,
-					command=lambda axis=axis, direction=direction: self._jog_rotation_world(axis, direction),
-				).grid(row=1, column=column, padx=1, pady=1)
+		self.rotation_step_entry.grid(row=0, column=3, padx=(4, 0))
 
-		ttk.Label(controls, text="J step").grid(row=2, column=0, sticky=tk.W)
-		self.joint_step_entry = ttk.Spinbox(controls, from_=0.1, to=360.0, increment=1.0, width=6)
+		frame_groups = (
+			("Base frame", self._jog_cartesian, self._jog_rotation_world),
+			("Tool frame", self._jog_tool_translation, self._jog_rotation_tool),
+		)
+		for column, (title, translate, rotate) in enumerate(frame_groups):
+			group = ttk.LabelFrame(controls, text=title, padding=(8, 4))
+			group.grid(row=1, column=column, sticky=tk.NW, padx=(0, 8))
+			self._build_frame_jog_buttons(group, translate, rotate)
+
+		joints = ttk.LabelFrame(controls, text="Joint jogs", padding=(8, 4))
+		joints.grid(row=2, column=0, columnspan=len(frame_groups), sticky=tk.EW, pady=(6, 0))
+		ttk.Label(joints, text="Joint step").grid(row=0, column=0, sticky=tk.W)
+		self.joint_step_entry = ttk.Spinbox(joints, from_=0.1, to=360.0, increment=1.0, width=6)
 		self.joint_step_entry.insert(0, "5")
-		self.joint_step_entry.grid(row=2, column=1, padx=(2, 5))
+		self.joint_step_entry.grid(row=0, column=1, padx=(4, 16))
 		self.front_joint_angle_vars: list[tk.StringVar] = []
 		for joint_index in range(6):
 			column = 2 + joint_index * 3
-			ttk.Label(controls, text=f"J{joint_index + 1}").grid(row=2, column=column)
+			ttk.Label(joints, text=f"J{joint_index + 1}").grid(row=0, column=column)
 			ttk.Button(
-				controls, text="-", width=1,
+				joints, text="-", width=1,
 				command=lambda index=joint_index: self._jog_joint(index, -1),
-			).grid(row=2, column=column + 1, padx=1)
+			).grid(row=0, column=column + 1, padx=1)
 			angle_var = tk.StringVar(master=self.root, value="0.0°")
 			self.front_joint_angle_vars.append(angle_var)
 			ttk.Button(
-				controls, text="+", width=1,
+				joints, text="+", width=1,
 				command=lambda index=joint_index: self._jog_joint(index, 1),
-			).grid(row=2, column=column + 2, padx=1)
-			ttk.Label(controls, textvariable=angle_var, width=6, anchor=tk.CENTER).grid(
-				row=3, column=column, columnspan=3
+			).grid(row=0, column=column + 2, padx=1)
+			ttk.Label(joints, textvariable=angle_var, width=6, anchor=tk.CENTER).grid(
+				row=1, column=column, columnspan=3
 			)
 		self.jog_status_label = ttk.Label(self.view_tab, anchor=tk.W, padding=(4, 1))
 		self.jog_status_label.pack(fill=tk.X)
+
+	def _build_frame_jog_buttons(
+		self,
+		group: ttk.LabelFrame,
+		translate: Callable[[int, int], None],
+		rotate: Callable[[int, int], None],
+	) -> None:
+		"""Fill one frame group with its translation and rotation jog buttons."""
+		for axis, name in enumerate(("X", "Y", "Z")):
+			for direction, suffix in ((-1, "-"), (1, "+")):
+				column = axis * 2 + (1 if direction > 0 else 0)
+				ttk.Button(
+					group, text=f"{name}{suffix}", width=3,
+					command=lambda axis=axis, direction=direction: translate(axis, direction),
+				).grid(row=0, column=column, padx=1, pady=1)
+				ttk.Button(
+					group, text=f"R{name}{suffix}", width=4,
+					command=lambda axis=axis, direction=direction: rotate(axis, direction),
+				).grid(row=1, column=column, padx=1, pady=1)
 
 	def _copy_t6_position(self) -> None:
 		transform = forward_kinematics(self.parameters)[-1]
@@ -259,9 +324,7 @@ class RobotArmSimulator:
 		try:
 			static_values = self._read_entry_values()
 			joint_angles = list(self._read_joint_angle_values())
-			step = float(self.joint_step_entry.get())
-			if not math.isfinite(step) or step <= 0:
-				raise ValueError("Joint step must be a finite positive angle.")
+			step = self._read_step(self.joint_step_entry, "Joint step must be a finite positive angle.")
 		except ValueError as error:
 			self.jog_status_label.configure(text=str(error))
 			return
@@ -282,44 +345,36 @@ class RobotArmSimulator:
 		self.parameters = self._to_dh_parameters(static_values, joint_angles_degrees)
 		self._render_scene()
 
-	def _jog_cartesian(self, axis: int, direction: int) -> None:
-		try:
-			static_values = self._read_entry_values()
-			joint_angles_degrees = self._read_joint_angle_values()
-			step = float(self.jog_step_entry.get())
-			if not math.isfinite(step) or step <= 0:
-				raise ValueError("Jog step must be a finite positive length.")
-			geometry = self._to_dh_parameters(static_values)
-			current_parameters = self._to_dh_parameters(static_values, joint_angles_degrees)
-			current_pose = forward_kinematics(current_parameters)[-1]
-			target_pose = offset_pose_translation(current_pose, axis, direction * step)
-			solutions = inverse_kinematics(target_pose, geometry)
-		except ValueError as error:
-			self.jog_status_label.configure(text=str(error))
-			return
-		current_angles = tuple(math.radians(angle) for angle in joint_angles_degrees)
-		if not solutions:
-			self.jog_status_label.configure(text="No exact-pose IK solution; robot was not moved.")
-			return
-		new_angles = min(solutions, key=lambda solution: sum(
-			math.atan2(math.sin(candidate - current), math.cos(candidate - current)) ** 2
-			for candidate, current in zip(solution.angles, current_angles)
-		)).angles
-		self._apply_joint_solution(static_values, new_angles)
-		self.jog_status_label.configure(text=f"Moved {'XYZ'[axis]} {direction * step:+g}")
+	def _read_step(self, entry: ttk.Spinbox, message: str) -> float:
+		"""Return a step entry's value, rejecting anything but a positive number."""
+		step = float(entry.get())
+		if not math.isfinite(step) or step <= 0:
+			raise ValueError(message)
+		return step
 
-	def _jog_rotation_world(self, axis: int, direction: int) -> None:
+	def _pose_jog(
+		self,
+		step_entry: ttk.Spinbox,
+		step_error: str,
+		target_builder: Callable[[tuple[tuple[float, ...], ...], float], tuple[tuple[float, ...], ...]],
+		describe: Callable[[float], str],
+	) -> None:
+		"""Solve one Cartesian jog and move to the branch nearest the current pose.
+
+		``target_builder(pose, step)`` returns the requested pose for that step and
+		``describe(step)`` the status text to show once it is reached. Reading the
+		DH table or the step, and the solve itself, all report through the status
+		label instead of raising into Tk's handler.
+		"""
 		try:
 			static_values = self._read_entry_values()
 			joint_angles_degrees = self._read_joint_angle_values()
-			step_degrees = float(self.rotation_step_entry.get())
-			if not math.isfinite(step_degrees) or step_degrees <= 0:
-				raise ValueError("Rotation step must be a finite positive angle.")
+			step = self._read_step(step_entry, step_error)
+			geometry = self._to_dh_parameters(static_values)
 			current_pose = forward_kinematics(
 				self._to_dh_parameters(static_values, joint_angles_degrees)
 			)[-1]
-			target_pose = rotate_pose_world_axis(current_pose, axis, math.radians(direction * step_degrees))
-			solutions = inverse_kinematics(target_pose, self._to_dh_parameters(static_values))
+			solutions = inverse_kinematics(target_builder(current_pose, step), geometry)
 		except ValueError as error:
 			self.jog_status_label.configure(text=str(error))
 			return
@@ -332,7 +387,43 @@ class RobotArmSimulator:
 			for candidate, current in zip(solution.angles, current_angles)
 		)).angles
 		self._apply_joint_solution(static_values, new_angles)
-		self.jog_status_label.configure(text=f"Rotated R{'XYZ'[axis]} {direction * step_degrees:+g} deg")
+		self.jog_status_label.configure(text=describe(step))
+
+	def _jog_cartesian(self, axis: int, direction: int) -> None:
+		"""Offset T6 along a base-frame axis, keeping its orientation."""
+		self._pose_jog(
+			self.jog_step_entry,
+			"Jog step must be a finite positive length.",
+			lambda pose, step: offset_pose_translation(pose, axis, direction * step),
+			lambda step: f"Moved base {'XYZ'[axis]} {direction * step:+g}",
+		)
+
+	def _jog_tool_translation(self, axis: int, direction: int) -> None:
+		"""Offset T6 along one of the tool frame's own axes, keeping its orientation."""
+		self._pose_jog(
+			self.jog_step_entry,
+			"Jog step must be a finite positive length.",
+			lambda pose, step: offset_pose_tool_translation(pose, axis, direction * step),
+			lambda step: f"Moved tool {'XYZ'[axis]} {direction * step:+g}",
+		)
+
+	def _jog_rotation_world(self, axis: int, direction: int) -> None:
+		"""Turn T6 about a base-frame axis, keeping its origin fixed."""
+		self._pose_jog(
+			self.rotation_step_entry,
+			"Rotation step must be a finite positive angle.",
+			lambda pose, step: rotate_pose_world_axis(pose, axis, math.radians(direction * step)),
+			lambda step: f"Rotated base R{'XYZ'[axis]} {direction * step:+g} deg",
+		)
+
+	def _jog_rotation_tool(self, axis: int, direction: int) -> None:
+		"""Turn T6 about one of the tool frame's own axes, keeping its origin fixed."""
+		self._pose_jog(
+			self.rotation_step_entry,
+			"Rotation step must be a finite positive angle.",
+			lambda pose, step: rotate_pose_tool_axis(pose, axis, math.radians(direction * step)),
+			lambda step: f"Rotated tool R{'XYZ'[axis]} {direction * step:+g} deg",
+		)
 
 	def _build_parameter_tab(self) -> None:
 		self.parameter_notebook = ttk.Notebook(self.parameters_tab)

@@ -21,7 +21,9 @@ from kinematics import (
 )
 from simulator import (
 	_rotation_to_rpy_degrees,
+	offset_pose_tool_translation,
 	offset_pose_translation,
+	rotate_pose_tool_axis,
 	rotate_pose_world_axis,
 )
 
@@ -191,6 +193,52 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.assertAlmostEqual(rotated[1][column], pose[0][column], delta=1e-12)
 			self.assertAlmostEqual(rotated[2][column], pose[2][column], delta=1e-12)
 
+	def test_tool_translation_moves_along_the_tool_axis(self) -> None:
+		pose = forward_kinematics(
+			parameters_at_angles(self.geometry, (0.2, -0.3, 0.4, -0.1, 0.5, -0.6))
+		)[-1]
+		step = 2.5
+		for axis in range(3):
+			with self.subTest(axis=axis):
+				moved = offset_pose_tool_translation(pose, axis, step)
+				for row in range(3):
+					for column in range(3):
+						self.assertEqual(moved[row][column], pose[row][column])
+					self.assertAlmostEqual(
+						moved[row][3] - pose[row][3], step * pose[row][axis], delta=1e-12
+					)
+
+	def test_tool_rotation_postmultiplies_and_keeps_position(self) -> None:
+		pose = forward_kinematics(
+			parameters_at_angles(self.geometry, (0.2, -0.3, 0.4, -0.1, 0.5, -0.6))
+		)[-1]
+		turned = rotate_pose_tool_axis(pose, 2, math.pi / 2)
+		self.assertEqual(frame_origin(turned), frame_origin(pose))
+		# Turning about the tool's own Z carries its X axis onto its Y axis,
+		# which is what separates this from the world-axis rotation below.
+		for row in range(3):
+			self.assertAlmostEqual(turned[row][0], pose[row][1], delta=1e-12)
+			self.assertAlmostEqual(turned[row][1], -pose[row][0], delta=1e-12)
+			self.assertAlmostEqual(turned[row][2], pose[row][2], delta=1e-12)
+
+	def test_tool_rotation_differs_from_world_rotation(self) -> None:
+		pose = forward_kinematics(
+			parameters_at_angles(self.geometry, (0.2, -0.3, 0.4, -0.1, 0.5, -0.6))
+		)[-1]
+		angle = math.radians(30.0)
+		tool_rotated = rotate_pose_tool_axis(pose, 1, angle)
+		world_rotated = rotate_pose_world_axis(pose, 1, angle)
+		largest_difference = max(
+			abs(tool_rotated[row][column] - world_rotated[row][column])
+			for row in range(3)
+			for column in range(3)
+		)
+		self.assertGreater(largest_difference, 0.1)
+		restored = rotate_pose_tool_axis(tool_rotated, 1, -angle)
+		for row in range(3):
+			for column in range(3):
+				self.assertAlmostEqual(restored[row][column], pose[row][column], delta=1e-12)
+
 	def test_position_only_solvers_reach_known_targets(self) -> None:
 		commanded_degrees = (25.0, -35.0, 30.0, 40.0, -55.0, 15.0)
 		commanded = tuple(math.radians(value) for value in commanded_degrees)
@@ -242,7 +290,7 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.assertTrue(app._apply_from_entries())
 			start_pose = forward_kinematics(app.parameters)[-1]
 			app._jog_cartesian(1, 1)
-			self.assertEqual(app.jog_status_label.cget("text"), "Moved Y +1")
+			self.assertEqual(app.jog_status_label.cget("text"), "Moved base Y +1")
 			end_pose = forward_kinematics(app.parameters)[-1]
 			for actual, expected in zip(
 				frame_origin(end_pose), (start_pose[0][3], start_pose[1][3] + 1.0, start_pose[2][3])
@@ -263,6 +311,48 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			copied_angles = tuple(float(copied_lines[index].split(": ", 1)[1]) for index in range(9, 15))
 			for actual, entry in zip(copied_angles, app.joint_angle_entries):
 				self.assertAlmostEqual(actual, float(entry.get()), delta=1e-10)
+		finally:
+			app.root.destroy()
+
+	def test_tk_tool_jogs_move_along_and_about_the_tool_axes(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			for entry, value in zip(app.joint_angle_entries, (25.0, -35.0, 30.0, 40.0, -55.0, 15.0)):
+				entry.delete(0, tk.END)
+				entry.insert(0, str(value))
+			self.assertTrue(app._apply_from_entries())
+			start_pose = forward_kinematics(app.parameters)[-1]
+
+			# Applied angles are written into the Spinboxes with six significant
+			# digits, so the pose the app recomputes carries about 1e-4 of
+			# quantization in position and 1e-6 in rotation. The tolerances below
+			# sit just above that floor; the moves asserted are 1e3 to 1e5 larger.
+			app._jog_tool_translation(2, 1)
+			self.assertEqual(app.jog_status_label.cget("text"), "Moved tool Z +1")
+			moved_pose = forward_kinematics(app.parameters)[-1]
+			for row in range(3):
+				for column in range(3):
+					self.assertAlmostEqual(moved_pose[row][column], start_pose[row][column], delta=1e-5)
+				self.assertAlmostEqual(
+					moved_pose[row][3] - start_pose[row][3], start_pose[row][2], delta=1e-3
+				)
+
+			before_rotation = forward_kinematics(app.parameters)[-1]
+			app._jog_rotation_tool(0, 1)
+			self.assertEqual(app.jog_status_label.cget("text"), "Rotated tool RX +5 deg")
+			turned_pose = forward_kinematics(app.parameters)[-1]
+			for actual, expected in zip(frame_origin(turned_pose), frame_origin(before_rotation)):
+				self.assertAlmostEqual(actual, expected, delta=1e-3)
+			expected_rotation = rotate_pose_tool_axis(before_rotation, 0, math.radians(5.0))
+			for row in range(3):
+				for column in range(3):
+					self.assertAlmostEqual(
+						turned_pose[row][column], expected_rotation[row][column], delta=1e-5
+					)
 		finally:
 			app.root.destroy()
 
@@ -319,7 +409,7 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			before = forward_kinematics(app.parameters)[-1]
 			expected = rotate_pose_world_axis(before, 1, math.radians(5.0))
 			app._jog_rotation_world(1, 1)
-			self.assertEqual(app.jog_status_label.cget("text"), "Rotated RY +5 deg")
+			self.assertEqual(app.jog_status_label.cget("text"), "Rotated base RY +5 deg")
 			after = forward_kinematics(app.parameters)[-1]
 			for actual, position in zip(frame_origin(after), frame_origin(before)):
 				self.assertAlmostEqual(actual, position, delta=1e-7)
