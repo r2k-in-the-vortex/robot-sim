@@ -1,4 +1,6 @@
 module
+import Mathlib.Algebra.BigOperators.Fin
+import Mathlib.Basic.Real.Basic
 import Mathlib.Data.Matrix.Basic
 import Mathlib.Data.Fin.VecNotation
 import Mathlib.Tactic.Ring
@@ -35,6 +37,15 @@ noncomputable def cross (u v : Fin 3 → ℝ) : Fin 3 → ℝ :=
 -- Define the dot product (inner product) of two 3D vectors.
 noncomputable def dot (u v : Fin 3 → ℝ) : ℝ :=
   u 0 * v 0 + u 1 * v 1 + u 2 * v 2
+
+-- The components of the cross product, one lemma per index.
+--
+-- These are what let `simp` see through `cross` in the proofs below: unfolding
+-- `cross` itself only yields `![...]`, and `![a, b, c] k` does not reduce by
+-- rewriting, so the components have to be named for the literal indices.
+@[simp] theorem cross_apply_zero (u v : Fin 3 → ℝ) : cross u v 0 = u 1 * v 2 - u 2 * v 1 := rfl
+@[simp] theorem cross_apply_one (u v : Fin 3 → ℝ) : cross u v 1 = u 2 * v 0 - u 0 * v 2 := rfl
+@[simp] theorem cross_apply_two (u v : Fin 3 → ℝ) : cross u v 2 = u 0 * v 1 - u 1 * v 0 := rfl
 
 -- A Twist represents the velocity of a rigid body at a point.
 -- v is the linear velocity of the reference point, ω is the angular velocity.
@@ -80,6 +91,11 @@ theorem virtualWork_invariant (p : Fin 3 → ℝ) (R : Matrix (Fin 3) (Fin 3) �
     (tipWrench : Wrench) (t : Twist) :
     virtualWork (tipToSensor p R tipWrench) t =
     virtualWork tipWrench (sensorTwistToTip p R t) := by
-  simp [virtualWork, tipToSensor, sensorTwistToTip, sensorTwistToTipVelocity, dot, cross,
-    Matrix.mulVec, Matrix.transpose_apply, Fin.sum_univ_three]
+  -- Unfold the definitions until only the entries of `p`, `R` and the wrench and
+  -- twist vectors remain, then close the resulting polynomial identity. `cross`
+  -- is deliberately left folded in favour of its component lemmas, and `simp only`
+  -- keeps the default simp set out of the expansion.
+  simp only [virtualWork, tipToSensor, sensorTwistToTip, sensorTwistToTipVelocity, dot,
+    dotProduct, Matrix.mulVec, Matrix.transpose_apply, Fin.sum_univ_three, Pi.add_apply,
+    cross_apply_zero, cross_apply_one, cross_apply_two]
   ring
