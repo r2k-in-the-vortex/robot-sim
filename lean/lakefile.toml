@@ -9,3 +9,10 @@ rev = "v4.35.0"
 
 [[lean_lib]]
 name = "TorqueWrench"
+
+# Evaluates the transforms on the exact-rational cases and writes
+# ../test_data/force_torque_frames.json. Not in `defaultTargets`: `lake build` stays a
+# pure proof build, and the generator is compiled on demand by `lake exe`.
+[[lean_exe]]
+name = "force_torque_test_data"
+root = "ForceTorqueTestData"
