@@ -27,14 +27,17 @@ from kinematics import (
 )
 
 DEFAULT_DH_VALUES = (
-	(0.0, 0.30, 0.0, 90.0),
-	(0.0, 0.0, 0.40, 0.0),
-	(0.0, 0.0, 0.35, 0.0),
-	(0.0, 0.30, 0.0, 90.0),
+	(0.0, 40.0, 10.0, 90.0),
+	(90.0, 0.0, 40.0, 0.0),
+	(0.0, 0.0, 0.0, 90.0),
+	(0.0, 40.0, 0.0, 90.0),
 	(0.0, 0.0, 0.0, -90.0),
-	(0.0, 0.12, 0.0, 0.0),
+	(0.0, 10.0, 0.0, 0.0),
 )
 MESH_FRAME_NAMES = ("Base", "J1", "J2", "J3", "J4", "J5", "J6")
+# Standard DH: joint i rotates about Z of frame i - 1, so frames 0-5 are labeled
+# as the joints whose axes they carry and frame 6 is the flange.
+AXIS_FRAME_NAMES = ("J1", "J2", "J3", "J4", "J5", "J6", "Tool/Flange")
 MESH_COLORS = ("#536d7a", "#d94a45", "#31845b", "#3978c5", "#d18b2c", "#7655a5", "#278b8b")
 
 
@@ -288,14 +291,12 @@ class RobotArmSimulator:
 				raise ValueError("Jog step must be a finite positive length.")
 			geometry = self._to_dh_parameters(static_values)
 			current_parameters = self._to_dh_parameters(static_values, joint_angles_degrees)
+			current_pose = forward_kinematics(current_parameters)[-1]
+			target_pose = offset_pose_translation(current_pose, axis, direction * step)
+			solutions = inverse_kinematics(target_pose, geometry)
 		except ValueError as error:
 			self.jog_status_label.configure(text=str(error))
 			return
-		current_pose = forward_kinematics(current_parameters)[-1]
-		target_pose = offset_pose_translation(current_pose, axis, direction * step)
-		solutions = inverse_kinematics(
-			target_pose, geometry, preferred_theta3=math.radians(joint_angles_degrees[2])
-		)
 		current_angles = tuple(math.radians(angle) for angle in joint_angles_degrees)
 		if not solutions:
 			self.jog_status_label.configure(text="No exact-pose IK solution; robot was not moved.")
@@ -314,17 +315,14 @@ class RobotArmSimulator:
 			step_degrees = float(self.rotation_step_entry.get())
 			if not math.isfinite(step_degrees) or step_degrees <= 0:
 				raise ValueError("Rotation step must be a finite positive angle.")
+			current_pose = forward_kinematics(
+				self._to_dh_parameters(static_values, joint_angles_degrees)
+			)[-1]
+			target_pose = rotate_pose_world_axis(current_pose, axis, math.radians(direction * step_degrees))
+			solutions = inverse_kinematics(target_pose, self._to_dh_parameters(static_values))
 		except ValueError as error:
 			self.jog_status_label.configure(text=str(error))
 			return
-		current_pose = forward_kinematics(
-			self._to_dh_parameters(static_values, joint_angles_degrees)
-		)[-1]
-		target_pose = rotate_pose_world_axis(current_pose, axis, math.radians(direction * step_degrees))
-		solutions = inverse_kinematics(
-			target_pose, self._to_dh_parameters(static_values),
-			preferred_theta3=math.radians(joint_angles_degrees[2])
-		)
 		if not solutions:
 			self.jog_status_label.configure(text="No exact-pose IK solution; robot was not moved.")
 			return
@@ -402,7 +400,7 @@ class RobotArmSimulator:
 		)
 		gizmo_controls = ttk.Frame(self.dh_tab)
 		gizmo_controls.grid(row=14, column=0, columnspan=6, sticky=tk.W)
-		for index, (frame_name, variable) in enumerate(zip(MESH_FRAME_NAMES, self.coordinate_gizmo_vars)):
+		for index, (frame_name, variable) in enumerate(zip(AXIS_FRAME_NAMES, self.coordinate_gizmo_vars)):
 			ttk.Checkbutton(
 				gizmo_controls,
 				text=frame_name,
@@ -846,7 +844,7 @@ class RobotArmSimulator:
 			for frame_index, origin in enumerate(frame_origins):
 				self.axes.text(
 					origin[0], origin[1], origin[2] + marker_length * 0.2,
-					"Base" if frame_index == 0 else f"J{frame_index}",
+					AXIS_FRAME_NAMES[frame_index],
 					color="#26323b", fontsize=8,
 				)
 

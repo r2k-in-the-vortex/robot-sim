@@ -90,9 +90,9 @@ The actual robot has no prismatic joints, only revolute joints, prismatic parame
 
 # Inverse kinematics
 
-The robot has only revolute joints, so the joint angles are the variables; all DH distances and link dimensions are fixed. For the current configuration, joint 5 has $d_5 = a_5 = 0$, and joint 6 has $d_6 = 0$, $a_6 = 0.12$, and $\alpha_6 = 0$. There is no additional tool transform, so frame 6 is the end-effector frame.
+The robot has only revolute joints, so the joint angles are the variables; all DH distances and link dimensions are fixed. For the current configuration, $a_3 = d_3 = 0$ puts frame 3 on frame 2, $a_4 = 0$ keeps the joint 4 axis on the frame-3 $Z$ axis, $a_5 = d_5 = 0$ puts frame 5 on frame 4, joint 6 has $a_6 = 0$ and $\alpha_6 = 0$, and $\alpha_4 = \pi/2$ with $\alpha_5 = -\pi/2$. Joints 4, 5, and 6 therefore meet in a spherical wrist at the frame-4 origin. There is no additional tool transform, so frame 6 is the end-effector frame.
 
-### 1. Back out the J6 and J5 frame origins
+### 1. Back out the wrist center
 
 Write the desired end-effector pose as
 
@@ -113,77 +113,81 @@ $$
 {}^0\mathbf{p}_{J6} = {}^0\mathbf{p}_6 = {}^0\mathbf{p}_{EE}.
 $$
 
-Since $\alpha_6=0$, the frame-5 and frame-6 axes are aligned. The J6 translation expressed in frame 6 is $[a_6,0,d_6]^T$, so the frame-5 origin is
+The wrist center is the shared origin of frames 4 and 5. Since $\alpha_6=0$, frame 6's $Z$ axis is frame 5's $Z$ axis, and the frame-6 origin sits $a_6$ along frame 6's $X$ axis and $d_6$ along its $Z$ axis from the wrist center:
 
 $$
-{}^0\mathbf{p}_5
+{}^0\mathbf{p}_4
 = {}^0\mathbf{p}_6 - R_0^6
 \begin{bmatrix}a_6\\0\\d_6\end{bmatrix}
-= {}^0\mathbf{p}_{EE} - 0.12
-\begin{bmatrix}r_{11}\\r_{21}\\r_{31}\end{bmatrix}.
+= {}^0\mathbf{p}_{EE} - a_6\,\mathbf{r}_1 - d_6\,\mathbf{r}_3,
 $$
 
-Here $[r_{11},r_{21},r_{31}]^T$ is the end-effector's local $X$ axis in base coordinates, and the current $d_6=0$. Thus finding $P_5$ requires the desired orientation (or the local X-axis direction), not just the end-effector position.
+where $\mathbf{r}_1$ and $\mathbf{r}_3$ are the first and third columns of $R_0^6$, that is, frame 6's $X$ and $Z$ axes in base coordinates. The current robot has $a_6=0$ and $d_6=10$, so the wrist center is $P_{EE} - d_6\mathbf{r}_3$: finding it requires the desired orientation, not just the end-effector position.
 
 ### 2. Robot handedness and branch choices
 
 Inverse kinematics can have multiple branches. For this DH table, test both J1
-plane orientations and both planar elbow configurations. Joint limits,
-reachability, and collision checks can reject candidates. Also, $a_3=d_3=0$
-and $\alpha_3=0$, so joints 3 and 4 are coaxial in this ideal DH model: the
-pose depends on their sum $\psi=\theta_3+\theta_4$, not on each angle
-individually. Position and orientation therefore cannot distinguish their
-individual values; choose a split that satisfies the joint limits.
+plane orientations, both planar elbow configurations, and both wrist flips, so
+a reachable pose has up to eight solutions. Joint limits, reachability, and
+collision checks can reject candidates. Because joints 3 and 4 are
+perpendicular here rather than coaxial, the target determines each of them
+separately. Every candidate is checked against the target pose with forward
+kinematics before it is accepted, so a branch that does not reproduce the pose
+is discarded instead of returned.
 
 ### 3. Find the J1 angle and reduce to a plane
 
 The J1 rotation axis lies on base $Z$. In the current DH table, however,
-$a_1=0.1$, so the frame origin $P_1$ is offset from that axis. The plane
-containing $P_1$ through $P_5$ can have either of two azimuths, separated by
-$\pi$. Let $r=\sqrt{x_5^2+y_5^2}$ and define $\sigma\in\{+1,-1\}$ to select
+$a_1=10$, so the frame origin $P_1$ is offset from that axis, and the frame-1
+$X$ axis is the radial direction of the arm plane at azimuth $\theta_1$.
+Everything past frame 1 lies in that plane: the plane containing $P_1$ and the
+wrist center $P_4$ can have either of two azimuths, separated by
+$\pi$. Let $r=\sqrt{x_4^2+y_4^2}$ and define $\sigma\in\{+1,-1\}$ to select
 the plane orientation:
 
 $$
-\phi=\operatorname{atan2}(y_5,x_5),
+\phi=\operatorname{atan2}(y_4,x_4),
 \qquad
-θ_1^{(\sigma)}=\operatorname{atan2}(\sigma y_5,\sigma x_5).
+\theta_1^{(\sigma)}=\operatorname{atan2}(\sigma y_4,\sigma x_4).
 $$
 
 Equivalently, $\theta_1^{(+)}=\phi$ and
-$\theta_1^{(-)}=\operatorname{wrap}(\phi+\pi)$. Rotating $P_5$ into each
-candidate plane and measuring from the actual frame origin $P_1$ gives the
+$\theta_1^{(-)}=\operatorname{wrap}(\phi+\pi)$. Rotating the wrist center into
+each candidate plane and measuring from the actual frame origin $P_1$ gives the
 signed planar radial target
 
 $$
-q_\sigma=\sigma r-a_1=\sigma r-0.1,
+q_\sigma=\sigma r-a_1=\sigma r-10,
 \qquad
-h=z_5-d_1=z_5-0.3.
+h=z_4-d_1=z_4-40.
 $$
 
 Thus each J1 branch gives a different 2D target relative to J1:
 
 $$
-{}^1\mathbf{p}_{5,\mathrm{plane}}^{(\sigma)}
+{}^1\mathbf{p}_{4,\mathrm{plane}}^{(\sigma)}
 =\begin{bmatrix}q_\sigma\\h\end{bmatrix}
-=\begin{bmatrix}\sigma\sqrt{x_5^2+y_5^2}-0.1\\z_5-0.3\end{bmatrix}.
+=\begin{bmatrix}\sigma\sqrt{x_4^2+y_4^2}-10\\z_4-40\end{bmatrix}.
 $$
 
 If $r=0$, the azimuth $\phi$ is undefined; position alone cannot determine
-$\theta_1$, so handle that as a singular case rather than evaluating
+$\theta_1$. The pose is still reachable, so anchor the plane at $\theta_1=0$
+and let the pose check decide, rather than evaluating
 $\operatorname{atan2}(0,0)$.
 
 ### 4. Calculate the planar elbow angle
 
-The planar triangle has link lengths $L_2=a_2=0.4$ and $L_4=a_4=0.3$. For
-each J1 branch $\sigma$, use its 2D target $(q_\sigma,h)$ and define
+The planar chain has link lengths $L_2=a_2=40$ and $L_4=d_4=40$. The second
+link is the $d_4$ offset along the joint 4 axis, which $\alpha_3=\pi/2$ turns
+into a link perpendicular to that axis. For each J1 branch $\sigma$, use its 2D
+target $(q_\sigma,h)$ and define
 
 $$
 D_\sigma=\sqrt{q_\sigma^2+h^2}.
 $$
 
-This is the distance from $P_1$ to $P_5$. The law of cosines gives two
-candidate values for the relative direction of the second link, which for
-this robot is the combined angle $\psi=\theta_3+\theta_4$:
+This is the distance from $P_1$ to the wrist center. The law of cosines gives
+two candidate values for the relative direction of the second link, $\psi$:
 
 $$
 \cos\psi_\sigma=
@@ -197,10 +201,9 @@ $$
 For each J1 branch, a solution exists only if
 $|L_2-L_4|\le D_\sigma\le L_2+L_4$. Clamp the cosine argument to $[-1,1]$
 only to absorb small floating-point errors; otherwise reject an unreachable
-target. Both signs are the elbow branches. The target determines $\psi$, not
-$\theta_3$ by itself.
+target. Both signs are the elbow branches.
 
-### 5. Calculate J2 from P5 and the selected branches
+### 5. Calculate J2 from the wrist center and the selected branches
 
 For each selected J1 and elbow branch, let $\psi=\psi_{\sigma,\pm}$ from the
 previous section. The planar position equations are
@@ -214,113 +217,89 @@ $$
 Solving for $\theta_2$ gives
 
 $$
-θ_2=
+\theta_2=
 \operatorname{atan2}(h,q_\sigma)
 -\operatorname{atan2}\left(
 L_4\sin\psi,\ L_2+L_4\cos\psi
 \right).
 $$
 
-Only the sum $\psi=\theta_3+\theta_4$ is determined by this position solve.
-Because joints 3 and 4 are coaxial with no intervening translation or twist,
-the full DH pose also depends on them only through this sum. Choose any
-$\theta_3$ within its limits and set
+### 6. Calculate J3
+
+The second link points along $\theta_2+\psi$ in the plane, and because
+$\alpha_3=\pi/2$ that direction is $\theta_2+\theta_3-\pi/2$. Hence
 
 $$
-θ_4=\operatorname{wrap}(\psi-\theta_3).
+\psi=\theta_3-\pi/2,
+\qquad
+\theta_3=\psi+\pi/2,
 $$
+
+so the position solve fixes $\theta_3$ as well: joints 3 and 4 are
+perpendicular here, not coaxial, and the target separates them. One case is
+still free: when $L_2=L_4$ and $D_\sigma=0$ the arm folds back with the wrist
+center on $P_1$, which leaves $\theta_2$ undetermined. That pose is reachable,
+so a split that reproduces it is returned rather than rejected.
 
 Use radians in these equations and check all joint limits for the selected
-branch and split.
+branch.
 
-### 6. Calculate J4
+### 7. Calculate the wrist angles
 
-With $\theta_1$, $\theta_2$, and $\theta_3$ selected, the orientation $R_0^3$
-is known. Since this robot has $a_5=d_5=0$, frames 4 and 5 have the same
-origin, so $P_5-P_3$ is the fixed $a_4$ link vector. Express that vector in
-frame 3:
+With $\theta_1$ through $\theta_3$ known, the orientation $R_0^3$ is known, and
+the wrist rotation relative to frame 3 is
 
 $$
-\mathbf{v}_4=(R_0^3)^T
-\left({}^0\mathbf{p}_5-{}^0\mathbf{p}_3\right).
+R_3^6=(R_0^3)^T R_0^6
+=R_z(\theta_4)R_x(\pi/2)R_z(\theta_5)R_x(-\pi/2)R_z(\theta_6)
+=R_z(\theta_4)R_y(-\theta_5)R_z(\theta_6),
 $$
 
-Standard DH gives $\mathbf{v}_4=a_4[\cos\theta_4,\sin\theta_4,0]^T$.
-Therefore
+a ZYZ decomposition. Its entries give the sine and cosine of $\theta_5$
+directly:
 
 $$
-θ_4=\operatorname{atan2}(v_{4y},v_{4x}),
-\qquad a_4=0.3.
+\sin\theta_5=\sqrt{(R_3^6)_{13}^2+(R_3^6)_{23}^2},
+\qquad
+\cos\theta_5=(R_3^6)_{33},
+\qquad
+\theta_5^{(\pm)}=\pm\operatorname{atan2}(\sin\theta_5,\cos\theta_5).
 $$
 
-The target must satisfy $\|\mathbf{v}_4\|=a_4$ and $v_{4z}=0$ within
-numerical tolerance. Once $\theta_4$ is found, the frame-4 orientation is
+Reading them from the matrix instead of through $\cos^{-1}$ matters near
+$\theta_5=0$: there $\cos^{-1}$ stalls at the square root of the rounding
+error in $(R_3^6)_{33}$, and the $d_6$ offset to the end effector magnifies
+that stall into a position error.
+
+For $\sin\theta_5\ne0$ the pair
 
 $$
-R_0^4=R_0^3R_z(\theta_4)R_x(\alpha_4),
-\qquad \alpha_4=\frac{\pi}{2}.
+\theta_4=\operatorname{atan2}\left((R_3^6)_{23},(R_3^6)_{13}\right),
+\qquad
+\theta_6=\operatorname{atan2}\left((R_3^6)_{32},-(R_3^6)_{31}\right)
 $$
 
-This recovers $\theta_4$ once a value of $\theta_3$ has been chosen. It should
-agree with $\operatorname{wrap}(\psi-\theta_3)$ from the planar solve. The two
-are not independently determined by the target pose; only their sum is.
+solves the decomposition on the negative $\theta_5$ branch; adding $\pi$ to
+both angles gives the positive branch. Those two are the wrist branches.
 
-### 7. Calculate J5
+### 8. The wrist singularity
 
-With the upstream orientation $R_0^4$ and desired end-effector orientation
-$R_0^6$, form the relative wrist rotation
-
-$$
-R_4^6=(R_0^4)^T R_0^6
-=R_z(\theta_5)R_x(-\pi/2)R_z(\theta_6).
-$$
-
-Its third column is $[-\sin\theta_5,\cos\theta_5,0]^T$, so
+When $\sin\theta_5=0$, joints 4 and 6 share an axis, so only their combination
+is observable: $\theta_4+\theta_6$ when $\theta_5=0$, and $\theta_4-\theta_6$
+when $\theta_5=\pi$. Hold $\theta_4=0$ and read the combination off what
+remains after removing joint 5:
 
 $$
-	heta_5=\operatorname{atan2}(-(R_4^6)_{13},(R_4^6)_{23})
-\pmod{2\pi}.
+R_y(\theta_5)\,(R_0^3)^T R_0^6=R_z(\theta_6)
+\qquad\text{when }\theta_4=0,
 $$
 
-Check that $(R_4^6)_{33}=0$ within numerical tolerance. Unlike the earlier
-$d_6$-offset configuration, the current $d_6=0$ means P5-to-P6 position alone
-does not determine $\theta_5$; use the target orientation.
+so $\theta_6$ is the $\operatorname{atan2}$ pair of that product's first
+column, and the position then follows from $P_4$ and the frame-4 orientation.
+The pose is still reachable; only the split between joints 4 and 6 is not
+unique, and any valid split may be chosen.
 
-### 8. Calculate J6
-
-The current configuration has $a_6=0.12$ and $d_6=0$, so $\theta_6$ rotates
-the J6 offset within the frame-5 XY plane and does affect P6. The target
-orientation also constrains it and provides a consistency check.
-
-Once $\theta_1$ through $\theta_5$ are known, calculate the orientation of
-frame 5:
-
-$$
-R_0^5=R_0^4R_z(\theta_5)R_x(\alpha_5),
-\qquad \alpha_5=-\frac{\pi}{2}.
-$$
-
-The relative orientation from frame 5 to frame 6 is
-
-$$
-R_5^6=(R_0^5)^T R_0^6.
-$$
-
-Since $\alpha_6=0$, $R_5^6=R_z(\theta_6)$, giving
-
-$$
-θ_6=\operatorname{atan2}\left((R_5^6)_{21},(R_5^6)_{11}\right)
-\pmod{2\pi}.
-$$
-
-The position must also satisfy
-
-$$
-{}^0\mathbf{p}_6={}^0\mathbf{p}_5+a_6R_0^6
-\begin{bmatrix}1\\0\\0\end{bmatrix},
-\qquad a_6=0.12.
-$$
-
-Here matrix indices are 1-based. For a valid target, $R_5^6$ should have the
-form $R_z(\theta_6)$ and the position equation should hold within numerical
-tolerance; deviations indicate an inconsistent target or upstream branch.
+Here matrix indices are 1-based. Every candidate branch is verified with
+forward kinematics before it is returned, so a target that no branch
+reproduces, such as an unreachable position or an orientation inconsistent
+with the position, yields no solution rather than an approximate one.

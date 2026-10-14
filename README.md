@@ -30,7 +30,15 @@ order, in degrees. Opacity ranges from 0 (transparent) to 1 (opaque). Use
 default. Apply changes to update the view. Save JSON and Load JSON persist all
 DH and mesh settings in `robot_parameters.json`; mesh paths are stored relative
 to the configuration file when possible. The included DH values are illustrative
-starter dimensions, not measurements for a specific robot.
+starter dimensions that match the shipped `robot_parameters.json`, not
+measurements for a specific robot.
+
+Cartesian and rotation jogs solve the full pose with closed-form inverse
+kinematics, which is derived for this robot's structure: `alpha` of 90, 0, 90,
+90, -90, 0 degrees, `a3 = a4 = a5 = a6 = 0`, `d2 = d3 = d5 = 0`, and positive
+`a2` and `d4`. A DH table that departs from that structure is still drawn and
+can still be jogged joint by joint, but a pose jog reports which parameter is
+unsupported in the status line instead of moving the robot.
 
 The DH Parameters tab also has independent coordinate-gizmo visibility
 checkboxes for the base and J1-J6. All are visible by default, and their states

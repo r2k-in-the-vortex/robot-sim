@@ -141,6 +141,14 @@ def _multiply3(
 	)
 
 
+def _rotation_y(angle: float) -> tuple[tuple[float, float, float], ...]:
+	return (
+		(math.cos(angle), 0.0, math.sin(angle)),
+		(0.0, 1.0, 0.0),
+		(-math.sin(angle), 0.0, math.cos(angle)),
+	)
+
+
 def _wrap_angle(angle: float) -> float:
 	return math.atan2(math.sin(angle), math.cos(angle))
 
@@ -209,10 +217,9 @@ def inverse_kinematics_position_preserving_roll_yaw(
 ) -> PositionIKSolution | None:
 	"""Solve XYZ while preserving roll/yaw and allowing pitch to vary.
 
-	The orientation constraints are appropriate for Cartesian jogs on this
-	five-independent-axis mechanism: preserving all six pose coordinates can be
-	overconstrained, but allowing pitch to change while holding roll and yaw
-	avoids unintended heading/roll drift.
+	Leaving pitch free gives the solver a spare degree of freedom, which helps
+	when an exact six-coordinate solve is awkward, while holding roll and yaw
+	still avoids unintended heading or roll drift.
 	"""
 	_validate_supported_geometry(geometry, tolerance)
 	if len(target_position) != 3 or not all(math.isfinite(value) for value in target_position):
@@ -309,11 +316,10 @@ def inverse_kinematics_position(
 ) -> PositionIKSolution | None:
 	"""Find a position-matching pose while allowing end-effector orientation to vary.
 
-	Uses damped least squares seeded from the current runtime joint angles. This
-	mode is useful for Cartesian position jogging on mechanisms with fewer than
-	six independent axes, where preserving arbitrary orientation can be
-	overconstrained. Geometry theta values are static offsets; returned angles
-	are runtime joint angles in radians.
+	Uses damped least squares seeded from the current runtime joint angles, which
+	helps when a target position is reachable but its full pose is not. Geometry
+	theta values are static offsets; returned angles are runtime joint angles in
+	radians.
 	"""
 	_validate_supported_geometry(geometry, tolerance)
 	if len(target_position) != 3 or not all(math.isfinite(value) for value in target_position):
@@ -401,6 +407,15 @@ def inverse_kinematics_position(
 
 
 def _validate_supported_geometry(parameters: Sequence[DHParameters], tolerance: float) -> None:
+	"""Reject DH tables the closed-form solver was not derived for.
+
+	The supported robot carries the arm on a base offset and ends in a spherical
+	wrist. ``a3 = d3 = 0`` puts frame 3 on frame 2 and ``a4 = 0`` swivels frame 4
+	about the joint 4 axis, so the arm is a planar two-link chain with link
+	lengths ``a2`` and ``d4``. ``a5 = d5 = 0`` coincides frames 4 and 5, and
+	``alpha4 = 90`` with ``alpha5 = -90`` turns joints 4, 5, and 6 into a ZYZ ball
+	joint about the frame-4 origin. ``d1``, ``a1``, ``theta``, and ``d6`` are free.
+	"""
 	if len(parameters) != 6:
 		raise ValueError(f"Expected DH parameters for 6 joints, got {len(parameters)}")
 	for joint in parameters:
@@ -413,40 +428,46 @@ def _validate_supported_geometry(parameters: Sequence[DHParameters], tolerance: 
 		(parameters[1].alpha, 0.0, "joint 2 alpha"),
 		(parameters[2].a, 0.0, "joint 3 a"),
 		(parameters[2].d, 0.0, "joint 3 d"),
-		(parameters[2].alpha, 0.0, "joint 3 alpha"),
-		(parameters[3].d, 0.0, "joint 4 d"),
+		(parameters[2].alpha, math.pi / 2, "joint 3 alpha"),
+		(parameters[3].a, 0.0, "joint 4 a"),
 		(parameters[3].alpha, math.pi / 2, "joint 4 alpha"),
 		(parameters[4].a, 0.0, "joint 5 a"),
 		(parameters[4].d, 0.0, "joint 5 d"),
 		(parameters[4].alpha, -math.pi / 2, "joint 5 alpha"),
+		(parameters[5].a, 0.0, "joint 6 a"),
 		(parameters[5].alpha, 0.0, "joint 6 alpha"),
-		(parameters[5].d, 0.0, "joint 6 d"),
 	)
 	for actual, expected, name in checks:
 		if not math.isclose(actual, expected, abs_tol=tolerance, rel_tol=0.0):
 			raise ValueError(f"Inverse kinematics requires {name}={expected:g}, got {actual:g}")
-	if parameters[1].a <= 0 or parameters[3].a <= 0 or parameters[5].a <= 0:
-		raise ValueError("Inverse kinematics requires positive a2, a4, and a6")
+	if parameters[1].a <= 0:
+		raise ValueError("Inverse kinematics requires a positive a2 link length")
+	if parameters[3].d <= 0:
+		raise ValueError("Inverse kinematics requires a positive d4 link offset")
 
 
 def inverse_kinematics(
 	target_pose: Matrix4,
 	geometry: Sequence[DHParameters],
 	*,
-	preferred_theta3: float = 0.0,
 	tolerance: float = 1e-7,
 ) -> tuple[InverseKinematicsSolution, ...]:
-	"""Solve the supported robot's IK, returning valid shoulder/elbow branches.
+	"""Solve the supported robot's IK, returning every valid branch.
 
-	The supported DH geometry has two J1 plane branches and two planar elbow
-	branches. Joints 3 and 4 are coaxial, so ``preferred_theta3`` selects one
-	valid split of their observable sum. ``geometry`` theta values are static
-	DH offsets; returned angles are variable joint angles in radians. Unreachable
-	or pose-inconsistent targets return an empty tuple.
+	The arm is a planar two-link chain, so a reachable target has two shoulder
+	branches (which side of the base axis the arm works) and two elbow branches,
+	and each of those pairs combines with the two wrist branches of the spherical
+	wrist for up to eight solutions, and a few more when the target sits on the
+	wrist singularity, where joints 4 and 6 share an axis and their split is not
+	unique. Every candidate is re-checked with forward kinematics before it is
+	returned, so each returned solution reproduces ``target_pose`` to
+	``tolerance``. ``geometry`` theta values are static DH offsets; returned
+	angles are variable joint angles in radians. Unreachable or pose-inconsistent
+	targets return an empty tuple.
 	"""
 	_validate_supported_geometry(geometry, tolerance)
-	if not math.isfinite(preferred_theta3) or not math.isfinite(tolerance) or tolerance <= 0:
-		raise ValueError("preferred_theta3 must be finite and tolerance must be positive")
+	if not math.isfinite(tolerance) or tolerance <= 0:
+		raise ValueError("tolerance must be positive")
 	if len(target_pose) != 4 or any(len(row) != 4 for row in target_pose):
 		raise ValueError("target_pose must be a 4x4 homogeneous transform")
 	if not all(math.isfinite(value) for row in target_pose for value in row):
@@ -462,22 +483,21 @@ def inverse_kinematics(
 		- geometry[5].d * target_rotation[axis][2]
 		for axis in range(3)
 	)  # type: ignore[assignment]
+
 	base_radius = math.hypot(wrist_center[0], wrist_center[1])
-	if base_radius <= tolerance:
-		return ()
+	# A wrist center on the base axis leaves theta1 free. The target is still
+	# reachable, so anchor the arm plane at zero and let the pose check decide.
+	base_azimuth = math.atan2(wrist_center[1], wrist_center[0]) if base_radius > tolerance else 0.0
 
 	a1 = geometry[0].a
 	d1 = geometry[0].d
 	link_one = geometry[1].a
-	link_two = geometry[3].a
+	link_two = geometry[3].d
 	wrist_height = wrist_center[2] - d1
-	preferred_theta3 = _wrap_angle(preferred_theta3)
 	solutions: list[InverseKinematicsSolution] = []
 
 	for shoulder_branch in (1, -1):
-		total_theta1 = math.atan2(
-			shoulder_branch * wrist_center[1], shoulder_branch * wrist_center[0]
-		)
+		total_theta1 = base_azimuth if shoulder_branch == 1 else _wrap_angle(base_azimuth + math.pi)
 		radial_target = shoulder_branch * base_radius - a1
 		distance = math.hypot(radial_target, wrist_height)
 		cosine = (distance * distance - link_one * link_one - link_two * link_two) / (
@@ -492,61 +512,84 @@ def inverse_kinematics(
 			total_theta2 = math.atan2(wrist_height, radial_target) - math.atan2(
 				link_two * math.sin(psi), link_one + link_two * math.cos(psi)
 			)
-			theta3 = preferred_theta3
-			total_theta3 = geometry[2].theta + theta3
-			theta4 = _wrap_angle(psi - total_theta3 - geometry[3].theta)
+			# Link two is d4 along the joint 4 axis, which alpha3 = 90 turns into
+			# a planar link bent psi = theta3 - 90 degrees away from link one.
+			total_theta3 = psi + math.pi / 2
 			partial = tuple(
-				replace(joint, theta=joint.theta + angle)
-				for joint, angle in zip(
+				replace(joint, theta=total)
+				for joint, total in zip(
 					geometry,
 					(
-						total_theta1 - geometry[0].theta,
-						total_theta2 - geometry[1].theta,
-						theta3,
-						theta4,
-						-geometry[4].theta,
-						-geometry[5].theta,
+						total_theta1,
+						total_theta2,
+						total_theta3,
+						geometry[3].theta,
+						geometry[4].theta,
+						geometry[5].theta,
 					),
 				)
 			)
-			frame_four = forward_kinematics(partial)[3]
-			rotation_four = _rotation(frame_four)
-			relative_rotation = _multiply3(_transpose3(rotation_four), target_rotation)
-			theta5 = math.atan2(-relative_rotation[0][2], relative_rotation[1][2])
-			theta6 = math.atan2(-relative_rotation[2][0], -relative_rotation[2][1])
-			angles = (
-				total_theta1 - geometry[0].theta,
-				total_theta2 - geometry[1].theta,
-				theta3,
-				theta4,
-				theta5 - geometry[4].theta,
-				theta6 - geometry[5].theta,
+			relative_rotation = _multiply3(
+				_transpose3(_rotation(forward_kinematics(partial)[2])), target_rotation
 			)
-			reconstructed = forward_kinematics(
-				tuple(
-					replace(joint, theta=joint.theta + angle)
-					for joint, angle in zip(geometry, angles)
-				)
-			)[-1]
-			position_error = math.sqrt(
-				sum((reconstructed[row][3] - target_position[row]) ** 2 for row in range(3))
-			)
-			orientation_error = math.sqrt(
-				sum(
-					(reconstructed[row][column] - target_pose[row][column]) ** 2
-					for row in range(3)
-					for column in range(3)
-				)
-			)
-			if position_error <= tolerance and orientation_error <= tolerance:
-				solutions.append(
-					InverseKinematicsSolution(
-						angles=angles,
-						shoulder_branch=shoulder_branch,
-						elbow_branch=elbow_branch,
-						position_error=position_error,
-						orientation_error=orientation_error,
+			# sin(theta5) and cos(theta5) come straight off the rotation:
+			# acos(cos(theta5)) would stall at the square root of rounding noise
+			# near the singularity, and the d6 tool offset magnifies that stall
+			# into a position error larger than the tolerance.
+			sine_five = math.hypot(relative_rotation[0][2], relative_rotation[1][2])
+			cosine_five = relative_rotation[2][2]
+			wrist_candidates: list[tuple[float, float, float]] = []
+			for wrist_branch in (1, -1):
+				total_theta5 = wrist_branch * math.atan2(sine_five, cosine_five)
+				# The atan2 pair below reads the wrist off the rotation directly.
+				# It is the half of the solutions whose sin(-theta5) is positive,
+				# so it pairs with the negative theta5; the mirrored solution
+				# turns joints 4 and 6 by pi. Inside a hair of sin(theta5) = 0
+				# those entries are rounding noise, so also offer the split that
+				# holds joint 4 at zero, which stays accurate there. The pose
+				# check below keeps whichever of the two actually reproduces it.
+				mirror = 0.0 if wrist_branch < 0 else math.pi
+				wrist_candidates.append((
+					math.atan2(relative_rotation[1][2], relative_rotation[0][2]) + mirror,
+					total_theta5,
+					math.atan2(relative_rotation[2][1], -relative_rotation[2][0]) + mirror,
+				))
+				if sine_five <= 1e-6:
+					flattened = _multiply3(_rotation_y(total_theta5), relative_rotation)
+					wrist_candidates.append((0.0, total_theta5, math.atan2(flattened[1][0], flattened[0][0])))
+			for total_theta4, total_theta5, total_theta6 in wrist_candidates:
+				angles = tuple(
+					_wrap_angle(total - joint.theta)
+					for total, joint in zip(
+						(total_theta1, total_theta2, total_theta3, total_theta4, total_theta5, total_theta6),
+						geometry,
 					)
 				)
+				reconstructed = forward_kinematics(
+					tuple(
+						replace(joint, theta=joint.theta + angle)
+						for joint, angle in zip(geometry, angles)
+					)
+				)[-1]
+				position_error = math.sqrt(
+					sum((reconstructed[row][3] - target_position[row]) ** 2 for row in range(3))
+				)
+				orientation_error = math.sqrt(
+					sum(
+						(reconstructed[row][column] - target_pose[row][column]) ** 2
+						for row in range(3)
+						for column in range(3)
+					)
+				)
+				if position_error <= tolerance and orientation_error <= tolerance:
+					solutions.append(
+						InverseKinematicsSolution(
+							angles=angles,
+							shoulder_branch=shoulder_branch,
+							elbow_branch=elbow_branch,
+							position_error=position_error,
+							orientation_error=orientation_error,
+						)
+					)
 
 	return tuple(solutions)

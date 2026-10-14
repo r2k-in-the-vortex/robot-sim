@@ -78,7 +78,10 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		configuration = json.loads(
 			Path(__file__).with_name("robot_parameters.json").read_text(encoding="utf-8")
 		)
-		self.assertEqual(configuration["show_coordinate_gizmos"], [True] * 7)
+		gizmo_visibility = configuration["show_coordinate_gizmos"]
+		self.assertEqual(len(gizmo_visibility), 7)
+		for visible in gizmo_visibility:
+			self.assertIsInstance(visible, bool)
 		for joint in configuration["joints"]:
 			self.assertIn("theta_offset_deg", joint)
 			self.assertNotIn("theta_deg", joint)
@@ -116,16 +119,12 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 				+ frame_five_position[1] * math.sin(self.geometry[0].theta + angles[0])
 			)
 			expected_shoulder_branch = 1 if projected_radius >= 0 else -1
-			combined_elbow_angle = angle_error(
-				self.geometry[2].theta + angles[2] + self.geometry[3].theta + angles[3], 0.0
+			elbow_angle = angle_error(
+				self.geometry[2].theta + angles[2] - math.pi / 2, 0.0
 			)
-			expected_elbow_branch = 1 if math.sin(combined_elbow_angle) >= 0 else -1
+			expected_elbow_branch = 1 if math.sin(elbow_angle) >= 0 else -1
 
-			solutions = inverse_kinematics(
-				target_pose,
-				self.geometry,
-				preferred_theta3=angles[2],
-			)
+			solutions = inverse_kinematics(target_pose, self.geometry)
 			matching_branches = [
 				solution
 				for solution in solutions
@@ -192,27 +191,26 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.assertAlmostEqual(rotated[1][column], pose[0][column], delta=1e-12)
 			self.assertAlmostEqual(rotated[2][column], pose[2][column], delta=1e-12)
 
-	def test_plus_y_jog_from_requested_t6_position_is_reachable(self) -> None:
-		startup_pose = [list(row) for row in forward_kinematics(self.geometry)[-1]]
-		startup_pose[0][3] = 36.0
-		startup_pose[1][3] = 0.0
-		startup_pose[2][3] = 58.0
-		current_pose = tuple(tuple(row) for row in startup_pose)
-		self.assertTrue(inverse_kinematics(current_pose, self.geometry))
+	def test_position_only_solvers_reach_known_targets(self) -> None:
+		commanded_degrees = (25.0, -35.0, 30.0, 40.0, -55.0, 15.0)
+		commanded = tuple(math.radians(value) for value in commanded_degrees)
+		start_pose = forward_kinematics(parameters_at_angles(self.geometry, commanded))[-1]
+		start_position = frame_origin(start_pose)
+		self.assertTrue(inverse_kinematics(start_pose, self.geometry))
 
-		target_pose = offset_pose_translation(current_pose, 1, 1.0)
-		self.assertFalse(inverse_kinematics(target_pose, self.geometry))
 		start_solution = inverse_kinematics_position(
-			(36.0, 0.0, 58.0), self.geometry, initial_angles=(0.0,) * 6
+			start_position, self.geometry, initial_angles=(0.0,) * 6
 		)
 		self.assertIsNotNone(start_solution)
 		assert start_solution is not None
 		start_pose = forward_kinematics(
 			parameters_at_angles(self.geometry, start_solution.angles)
 		)[-1]
+		for actual, expected in zip(frame_origin(start_pose), start_position):
+			self.assertAlmostEqual(actual, expected, delta=1e-5)
 		start_rpy = tuple(math.radians(value) for value in _rotation_to_rpy_degrees(start_pose))
 		position_solution = inverse_kinematics_position_preserving_roll_yaw(
-			(36.0, 1.0, 58.0),
+			(start_position[0], start_position[1] + 1.0, start_position[2]),
 			self.geometry,
 			initial_angles=start_solution.angles,
 			preserved_roll_yaw=(start_rpy[0], start_rpy[2]),
@@ -222,13 +220,15 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		achieved_pose = forward_kinematics(
 			parameters_at_angles(self.geometry, position_solution.angles)
 		)[-1]
-		for actual, expected in zip(frame_origin(achieved_pose), (36.0, 1.0, 58.0)):
+		for actual, expected in zip(
+			frame_origin(achieved_pose), (start_position[0], start_position[1] + 1.0, start_position[2])
+		):
 			self.assertAlmostEqual(actual, expected, delta=1e-5)
 		achieved_rpy = _rotation_to_rpy_degrees(achieved_pose)
 		self.assertAlmostEqual(achieved_rpy[0], math.degrees(start_rpy[0]), delta=1e-4)
 		self.assertAlmostEqual(achieved_rpy[2], math.degrees(start_rpy[2]), delta=1e-4)
 
-	def test_tk_y_jog_preserves_orientation_or_refuses_move(self) -> None:
+	def test_tk_cartesian_jog_moves_to_requested_pose(self) -> None:
 		try:
 			from simulator import RobotArmSimulator
 			app = RobotArmSimulator()
@@ -236,25 +236,21 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.skipTest(f"Tk display unavailable: {error}")
 		try:
 			self.assertEqual(app.jog_step_entry.get(), "1")
-			start_solution = inverse_kinematics_position(
-				(36.0, 0.0, 58.0), self.geometry, initial_angles=(0.0,) * 6
-			)
-			self.assertIsNotNone(start_solution)
-			assert start_solution is not None
-			for entry, angle in zip(app.joint_angle_entries, start_solution.angles):
+			for entry, value in zip(app.joint_angle_entries, (25.0, -35.0, 30.0, 40.0, -55.0, 15.0)):
 				entry.delete(0, tk.END)
-				entry.insert(0, str(math.degrees(angle)))
+				entry.insert(0, str(value))
 			self.assertTrue(app._apply_from_entries())
-			start_position = frame_origin(forward_kinematics(app.parameters)[-1])
-			for actual, expected in zip(start_position, (36.0, 0.0, 58.0)):
-				self.assertAlmostEqual(actual, expected, delta=1e-5)
 			start_pose = forward_kinematics(app.parameters)[-1]
 			app._jog_cartesian(1, 1)
+			self.assertEqual(app.jog_status_label.cget("text"), "Moved Y +1")
 			end_pose = forward_kinematics(app.parameters)[-1]
-			self.assertIn("No exact-pose IK solution", app.jog_status_label.cget("text"))
-			for before_row, after_row in zip(start_pose, end_pose):
-				for before_value, after_value in zip(before_row, after_row):
-					self.assertAlmostEqual(before_value, after_value, delta=1e-9)
+			for actual, expected in zip(
+				frame_origin(end_pose), (start_pose[0][3], start_pose[1][3] + 1.0, start_pose[2][3])
+			):
+				self.assertAlmostEqual(actual, expected, delta=1e-5)
+			for row in range(3):
+				for column in range(3):
+					self.assertAlmostEqual(end_pose[row][column], start_pose[row][column], delta=1e-7)
 			app._copy_t6_position()
 			copied_lines = app.root.clipboard_get().splitlines()
 			self.assertEqual(copied_lines[0], "T6 position (model units):")
@@ -262,7 +258,7 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.assertEqual(copied_lines[8], "Runtime joint angles (degrees):")
 			self.assertEqual(len(copied_lines), 15)
 			copied_position = tuple(float(copied_lines[index].split(": ", 1)[1]) for index in (1, 2, 3))
-			for actual, expected in zip(copied_position, (36.0, 0.0, 58.0)):
+			for actual, expected in zip(copied_position, frame_origin(end_pose)):
 				self.assertAlmostEqual(actual, expected, delta=1e-5)
 			copied_angles = tuple(float(copied_lines[index].split(": ", 1)[1]) for index in range(9, 15))
 			for actual, entry in zip(copied_angles, app.joint_angle_entries):
@@ -270,28 +266,43 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		finally:
 			app.root.destroy()
 
-	def test_tk_unreachable_minus_z_jog_does_not_change_orientation(self) -> None:
+	def test_tk_jog_beyond_reach_is_refused_and_keeps_pose(self) -> None:
 		try:
 			from simulator import RobotArmSimulator
 			app = RobotArmSimulator()
 		except tk.TclError as error:
 			self.skipTest(f"Tk display unavailable: {error}")
 		try:
-			start_rows = [list(row) for row in forward_kinematics(self.geometry)[-1]]
-			start_rows[0][3], start_rows[1][3], start_rows[2][3] = 52.0, -1.0, 70.0
-			start_pose = tuple(tuple(row) for row in start_rows)
-			start_solutions = inverse_kinematics(start_pose, self.geometry)
-			self.assertTrue(start_solutions)
-			start_angles = start_solutions[0].angles
-			for entry, angle in zip(app.joint_angle_entries, start_angles):
+			for entry, value in zip(app.joint_angle_entries, (25.0, -35.0, 30.0, 40.0, -55.0, 15.0)):
 				entry.delete(0, tk.END)
-				entry.insert(0, str(math.degrees(angle)))
+				entry.insert(0, str(value))
 			self.assertTrue(app._apply_from_entries())
 			before = forward_kinematics(app.parameters)[-1]
+			app.jog_step_entry.delete(0, tk.END)
+			app.jog_step_entry.insert(0, "1000")
 			app._jog_cartesian(2, -1)
 			after = forward_kinematics(app.parameters)[-1]
 			self.assertIn("No exact-pose IK solution", app.jog_status_label.cget("text"))
 			for before_row, after_row in zip(before, after):
+				for before_value, after_value in zip(before_row, after_row):
+					self.assertAlmostEqual(before_value, after_value, delta=1e-9)
+		finally:
+			app.root.destroy()
+
+	def test_tk_jog_reports_unsupported_dh_table(self) -> None:
+		try:
+			from simulator import RobotArmSimulator
+			app = RobotArmSimulator()
+		except tk.TclError as error:
+			self.skipTest(f"Tk display unavailable: {error}")
+		try:
+			alpha_entry = app.parameter_entries[2][3]
+			alpha_entry.delete(0, tk.END)
+			alpha_entry.insert(0, "45")
+			before = forward_kinematics(app.parameters)[-1]
+			app._jog_cartesian(0, 1)
+			self.assertIn("joint 3 alpha", app.jog_status_label.cget("text"))
+			for before_row, after_row in zip(before, forward_kinematics(app.parameters)[-1]):
 				for before_value, after_value in zip(before_row, after_row):
 					self.assertAlmostEqual(before_value, after_value, delta=1e-9)
 		finally:
@@ -347,15 +358,19 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		except tk.TclError as error:
 			self.skipTest(f"Tk display unavailable: {error}")
 		try:
-			self.assertEqual(tuple(variable.get() for variable in app.coordinate_gizmo_vars), (True,) * 7)
+			# The saved configuration keeps whatever the user toggled last, so
+			# assert that the frames are independent rather than that all start on.
+			saved_visibility = tuple(variable.get() for variable in app.coordinate_gizmo_vars)
+			self.assertEqual(len(saved_visibility), 7)
 			self.assertTrue(app.show_joint_labels.get())
 			self.assertEqual(len(app.axes.texts), 7)
 			self.assertGreaterEqual(len(app.axes.lines), 20)
-			app.coordinate_gizmo_vars[3].set(False)
+			app.coordinate_gizmo_vars[3].set(not saved_visibility[3])
 			app._render_scene()
 			self.assertEqual(len(app.axes.texts), 7)
-			self.assertEqual(app.coordinate_gizmo_vars[0].get(), True)
-			self.assertEqual(app.coordinate_gizmo_vars[3].get(), False)
+			for index, variable in enumerate(app.coordinate_gizmo_vars):
+				expected = not saved_visibility[3] if index == 3 else saved_visibility[index]
+				self.assertEqual(variable.get(), expected)
 			app.show_joint_labels.set(False)
 			app._render_scene()
 			self.assertEqual(len(app.axes.texts), 0)
@@ -378,6 +393,181 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 			self.assertAlmostEqual(app.axes.azim, 61.0, delta=1e-3)
 		finally:
 			app.root.destroy()
+
+
+class JointwiseInverseKinematicsTests(unittest.TestCase):
+	"""Check inverse kinematics one joint at a time against known FK answers.
+
+	Every target pose below is built by forward kinematics from a joint vector
+	that is known before the solver runs, so each case has an exact expected
+	answer. Sweeps move a single joint at a time, so a failure names the joint at
+	fault, and the geometry comes from ``robot_parameters.json``, so the checks
+	follow whatever DH table the parameter tab was last saved with.
+	"""
+
+	sweep_angles_degrees = tuple(range(-180, 181, 15))
+	base_configurations_degrees = (
+		(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+		(0.0, 0.0, 0.0, 0.0, 40.0, 0.0),
+		(30.0, -25.0, 20.0, 45.0, -50.0, 10.0),
+	)
+	point_to_point_degrees = (25.0, -35.0, 30.0, 40.0, -55.0, 15.0)
+
+	@classmethod
+	def setUpClass(cls) -> None:
+		cls.geometry = configured_geometry()
+
+	def known_pose(self, joint_angles_degrees) -> tuple[tuple[tuple[float, ...], ...], tuple[float, ...]]:
+		"""Return the pose a known joint vector produces, with its radians."""
+		angles = tuple(math.radians(value) for value in joint_angles_degrees)
+		return forward_kinematics(parameters_at_angles(self.geometry, angles))[-1], angles
+
+	def assert_pose_reproduced(self, solutions, target_pose, message: str) -> None:
+		"""Fail unless at least one solution exists and all of them match the pose."""
+		self.assertTrue(solutions, f"{message}: no inverse-kinematics solution")
+		for solution in solutions:
+			recovered = forward_kinematics(parameters_at_angles(self.geometry, solution.angles))[-1]
+			position_error = math.dist(frame_origin(recovered), frame_origin(target_pose))
+			orientation_error = math.sqrt(
+				sum(
+					(recovered[row][column] - target_pose[row][column]) ** 2
+					for row in range(3)
+					for column in range(3)
+				)
+			)
+			self.assertLessEqual(position_error, 1e-8, f"{message}: position error {position_error:g}")
+			self.assertLessEqual(orientation_error, 1e-8, f"{message}: orientation error {orientation_error:g}")
+
+	def pose_pins_down_every_joint(self, target_pose, angles) -> bool:
+		"""Whether the target determines this joint vector uniquely.
+
+		Three configurations leave a joint free, so the commanded angles are not
+		the only valid answer and angle recovery cannot be asserted for them: a
+		wrist center on the base axis frees joint 1, one sitting on frame 1 frees
+		joint 2 whenever the two links are equal, and sin(theta5) = 0 makes joints
+		4 and 6 share an axis, leaving only their sum observable. Such poses are
+		still solvable, and the sweeps assert the pose for them.
+		"""
+		wrist_center = tuple(
+			target_pose[axis][3]
+			- self.geometry[5].a * target_pose[axis][0]
+			- self.geometry[5].d * target_pose[axis][2]
+			for axis in range(3)
+		)
+		frame_one_origin = (
+			self.geometry[0].a * math.cos(self.geometry[0].theta + angles[0]),
+			self.geometry[0].a * math.sin(self.geometry[0].theta + angles[0]),
+			self.geometry[0].d,
+		)
+		return (
+			math.hypot(wrist_center[0], wrist_center[1]) > 1e-6
+			and math.dist(wrist_center, frame_one_origin) > 1e-6
+			and abs(math.sin(self.geometry[4].theta + angles[4])) > 1e-6
+		)
+
+	def test_each_joint_sweep_round_trips(self) -> None:
+		for joint_index in range(6):
+			for base_degrees in self.base_configurations_degrees:
+				for sweep_degrees in self.sweep_angles_degrees:
+					commanded_degrees = list(base_degrees)
+					commanded_degrees[joint_index] = float(sweep_degrees)
+					label = f"J{joint_index + 1} at {sweep_degrees:g} deg from {base_degrees}"
+					with self.subTest(joint=joint_index + 1, base=base_degrees, angle=sweep_degrees):
+						target_pose, commanded = self.known_pose(commanded_degrees)
+						solutions = inverse_kinematics(target_pose, self.geometry)
+						self.assert_pose_reproduced(solutions, target_pose, label)
+						if self.pose_pins_down_every_joint(target_pose, commanded):
+							best_recovery = min(
+								max(
+									abs(angle_error(recovered, expected))
+									for recovered, expected in zip(solution.angles, commanded)
+								)
+								for solution in solutions
+							)
+							self.assertLessEqual(
+								best_recovery, 1e-7, f"{label}: commanded angles were not recovered"
+							)
+
+	def test_point_to_point_steps_stay_on_the_same_branch(self) -> None:
+		start_pose, commanded = self.known_pose(self.point_to_point_degrees)
+		step = 1.0
+		requests = [
+			offset_pose_translation(start_pose, axis, direction * step)
+			for axis in range(3)
+			for direction in (-1, 1)
+		] + [
+			rotate_pose_world_axis(start_pose, axis, math.radians(5.0)) for axis in range(3)
+		]
+		for index, target_pose in enumerate(requests):
+			with self.subTest(target=index):
+				solutions = inverse_kinematics(target_pose, self.geometry)
+				self.assert_pose_reproduced(solutions, target_pose, f"step target {index}")
+				nearest = min(
+					solutions,
+					key=lambda solution: sum(
+						angle_error(recovered, expected) ** 2
+						for recovered, expected in zip(solution.angles, commanded)
+					),
+				)
+				for recovered, expected in zip(nearest.angles, commanded):
+					self.assertLessEqual(
+						abs(angle_error(recovered, expected)),
+						math.radians(20.0),
+						f"step target {index} jumped to another branch",
+					)
+
+	def test_random_fk_poses_return_only_matching_solutions(self) -> None:
+		random_source = random.Random(20261014)
+		for trial in range(50):
+			angles = tuple(random_source.uniform(-math.pi, math.pi) for _ in range(6))
+			target_pose = forward_kinematics(parameters_at_angles(self.geometry, angles))[-1]
+			with self.subTest(trial=trial):
+				solutions = inverse_kinematics(target_pose, self.geometry)
+				self.assert_pose_reproduced(solutions, target_pose, f"trial {trial}")
+				self.assertLessEqual(len(solutions), 8)
+				best_recovery = min(
+					max(
+						abs(angle_error(recovered, expected))
+						for recovered, expected in zip(solution.angles, angles)
+					)
+					for solution in solutions
+				)
+				self.assertLessEqual(best_recovery, 1e-7, f"trial {trial}: commanded angles were not recovered")
+
+	def test_wrist_singularity_is_solvable(self) -> None:
+		for base_degrees in ((0.0,) * 6, (20.0, -30.0, 40.0, 0.0, 0.0, 60.0)):
+			commanded_degrees = list(base_degrees)
+			commanded_degrees[4] = math.degrees(-self.geometry[4].theta)
+			with self.subTest(base=base_degrees):
+				target_pose, commanded = self.known_pose(commanded_degrees)
+				solutions = inverse_kinematics(target_pose, self.geometry)
+				self.assert_pose_reproduced(solutions, target_pose, "wrist singularity")
+				self.assertFalse(self.pose_pins_down_every_joint(target_pose, commanded))
+				self.assertTrue(
+					any(
+						abs(math.sin(self.geometry[4].theta + solution.angles[4])) < 1e-6
+						for solution in solutions
+					),
+					"expected a solution that sits at the wrist singularity",
+				)
+
+	def test_structure_validation_names_the_unsupported_parameter(self) -> None:
+		target_pose = forward_kinematics(self.geometry)[-1]
+		perturbations = (
+			(2, "alpha", math.radians(45.0), "joint 3 alpha"),
+			(1, "d", 5.0, "joint 2 d"),
+			(3, "a", 5.0, "joint 4 a"),
+			(3, "d", 0.0, "d4"),
+		)
+		for joint_index, field, value, expected_text in perturbations:
+			geometry = tuple(
+				replace(joint, **{field: value}) if index == joint_index else joint
+				for index, joint in enumerate(self.geometry)
+			)
+			with self.subTest(joint=joint_index + 1, field=field):
+				with self.assertRaises(ValueError) as context:
+					inverse_kinematics(target_pose, geometry)
+				self.assertIn(expected_text, str(context.exception))
 
 
 if __name__ == "__main__":

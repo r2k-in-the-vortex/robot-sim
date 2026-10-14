@@ -11,7 +11,7 @@
     true,
     false,
     false,
-    false,
+    true,
     true
   ],
   "show_joint_labels": true,
@@ -38,12 +38,6 @@
       "theta_offset_deg": 0.0,
       "d": 40.0,
       "a": 0.0,
-      "alpha_deg": 0.0
-    },
-    {
-      "theta_offset_deg": 0.0,
-      "d": 0.0,
-      "a": 0.0,
       "alpha_deg": 90.0
     },
     {
@@ -51,6 +45,12 @@
       "d": 0.0,
       "a": 0.0,
       "alpha_deg": -90.0
+    },
+    {
+      "theta_offset_deg": 0.0,
+      "d": 10.0,
+      "a": 0.0,
+      "alpha_deg": 0.0
     }
   ],
   "meshes": [
