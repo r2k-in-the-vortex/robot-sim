@@ -18,8 +18,13 @@
 //! arrangement of bevy_egui's own `side_panel` example.
 
 mod camera;
+mod dialogs;
+mod jog;
 mod mesh;
+mod pyformat;
 mod scene;
+mod session;
+mod solve;
 mod ui;
 
 use bevy::camera::visibility::RenderLayers;
@@ -66,9 +71,14 @@ const PIXELS_PER_WHEEL_LINE: f64 = 50.0;
 
 /// Everything the scene draws: the parameter document and the six runtime joint angles.
 ///
-/// The angles are the editable half — WS5's jog controls write them — and they start at
-/// zero, the pose the reference opens in. Writing the resource is what drives the arm;
+/// The angles are the editable half — the jog controls write them — and they start at zero,
+/// the pose the reference opens in. Writing the resource is what drives the arm;
 /// [`scene::sync_joints`] reads it every frame.
+///
+/// The runtime angles are held at **full precision**; the DH page's angle fields only ever
+/// render them at display precision, and [`session::Session::read_joint_angles`] decides
+/// whether a field still means the stored angle or a typed-in one. Saving never writes them:
+/// see [`session::Session::save_json`].
 #[derive(Resource)]
 pub struct RobotState {
     pub document: Document,
@@ -154,8 +164,18 @@ fn main() -> AppExit {
         .resource_mut::<EguiGlobalSettings>()
         .auto_create_primary_context = false;
 
+    // The startup configuration load (`simulator.py:211-223`). It happens here rather than in
+    // a startup system because the scene's first frame already needs the document, and
+    // because a file the reference would have refused is reported through the same messagebox
+    // the UI draws ([`session::Session::notice`]) instead of being raised into a handler.
+    let (session, document, angles) = session::Session::start();
+
     app.insert_resource(ClearColor(scene::color(scene::BACKGROUND_COLOR)))
-        .init_resource::<RobotState>()
+        .insert_resource(RobotState {
+            document,
+            runtime_angles_deg: angles,
+        })
+        .insert_resource(session)
         .init_resource::<ViewState>()
         .init_resource::<Tab>()
         .init_resource::<ParameterTab>()
@@ -319,9 +339,8 @@ fn camera_input(
     mut drag: Local<DragState>,
 ) {
     let cursor = window.cursor_position();
-    let in_view = |point: Vec2| {
-        *tab == Tab::View && viewport.points.contains(egui::pos2(point.x, point.y))
-    };
+    let in_view =
+        |point: Vec2| *tab == Tab::View && viewport.points.contains(egui::pos2(point.x, point.y));
 
     match drag.button {
         // The button is what ends the drag, not the position: `_on_mouse_release`

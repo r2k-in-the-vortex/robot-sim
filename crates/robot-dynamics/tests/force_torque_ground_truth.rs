@@ -49,7 +49,13 @@ const CASE_BLOCKS: [&str; 6] = [
 
 /// The same for a chain, `CHAIN_NUMERIC_BLOCKS`.
 const CHAIN_BLOCKS: [&str; 7] = [
-    "p1", "R1", "p2", "R2", "tip_wrench", "sensor_twist", "expected",
+    "p1",
+    "R1",
+    "p2",
+    "R2",
+    "tip_wrench",
+    "sensor_twist",
+    "expected",
 ];
 
 /// The same for a dynamics case, `DYNAMICS_NUMERIC_BLOCKS`. `parts` is `null` or two
@@ -67,8 +73,8 @@ const DYNAMICS_BLOCKS: [&str; 8] = [
 
 /// The ground-truth document, parsed.
 fn document() -> Value {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test_data/force_torque_frames.json");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test_data/force_torque_frames.json");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
     serde_json::from_str(&text).expect("the ground-truth document is JSON")
@@ -294,10 +300,7 @@ fn every_static_case_transforms_exactly() {
             ratio(&expected["virtual_work_tip_frame"]),
             "{label}: virtualWork in the tip frame"
         );
-        assert_eq!(
-            work_sensor, work_tip,
-            "{label}: virtualWork_invariant"
-        );
+        assert_eq!(work_sensor, work_tip, "{label}: virtualWork_invariant");
 
         // the two round trips the case does not store directly
         assert_eq!(
@@ -419,7 +422,11 @@ fn every_dynamics_case_recomputes_exactly() {
         // acceleration, which has to be told the twist because the material point moved
         let tip_twist = sensor_twist_to_tip(p, r, sensor_twist);
         let tip_accel = sensor_accel_to_tip(p, r, sensor_twist, sensor_accel);
-        assert_eq!(tip_twist, twist(&expected["tip_twist"]), "{label}: sensorTwistToTip");
+        assert_eq!(
+            tip_twist,
+            twist(&expected["tip_twist"]),
+            "{label}: sensorTwistToTip"
+        );
         assert_eq!(
             tip_accel,
             accel(&expected["tip_accel"]),
@@ -514,8 +521,7 @@ fn every_dynamics_case_recomputes_exactly() {
             wrench(&expected["measured_wrench"]),
             "{label}: measuredWrench"
         );
-        let recovered =
-            recovered_contact_wrench(p, r, mp, sensor_twist, sensor_accel, g, measured);
+        let recovered = recovered_contact_wrench(p, r, mp, sensor_twist, sensor_accel, g, measured);
         assert_eq!(
             recovered,
             wrench(&expected["recovered_contact_wrench"]),
@@ -582,8 +588,7 @@ fn the_composition_parts_sum_to_the_composite() {
         let g = v3(&case["gravity"]);
         assert_eq!(
             inertial_wrench(composite, tip_twist, tip_accel),
-            inertial_wrench(one, tip_twist, tip_accel)
-                + inertial_wrench(two, tip_twist, tip_accel),
+            inertial_wrench(one, tip_twist, tip_accel) + inertial_wrench(two, tip_twist, tip_accel),
             "{label}: inertialWrench_add"
         );
         assert_eq!(

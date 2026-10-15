@@ -51,7 +51,13 @@ impl<S: Field> Geometry<S> {
     ///
     /// This is the Rust form of Lean's positivity fields: a value of `Geometry` is
     /// evidence that the arm is one the closed form is stated for.
-    pub fn new(a1: S, d1: S, link_one: S, link_two: S, tool_offset: S) -> Result<Self, GeometryError> {
+    pub fn new(
+        a1: S,
+        d1: S,
+        link_one: S,
+        link_two: S,
+        tool_offset: S,
+    ) -> Result<Self, GeometryError> {
         let values = [a1, d1, link_one, link_two, tool_offset];
         if !values.iter().all(|value| value.is_finite()) {
             return Err(GeometryError::NotFinite);

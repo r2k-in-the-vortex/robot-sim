@@ -146,7 +146,6 @@ impl<S: Field> SolutionSet<S> {
     pub fn iter(&self) -> core::slice::Iter<'_, Solution<S>> {
         self.as_slice().iter()
     }
-
 }
 
 impl<S: Scalar> SolutionSet<S> {

@@ -94,7 +94,9 @@ mod tests {
         // The shipped table has a 90 degree offset on joint 2; a runtime angle of 30
         // degrees must come back out of the total unchanged.
         let total = total_angle::<f64>(90.0, 30.0);
-        assert!((total - core::f64::consts::FRAC_PI_2 - core::f64::consts::FRAC_PI_6).abs() < 1e-15);
+        assert!(
+            (total - core::f64::consts::FRAC_PI_2 - core::f64::consts::FRAC_PI_6).abs() < 1e-15
+        );
         assert!((runtime_angle(total, 90.0) - core::f64::consts::FRAC_PI_6).abs() < 1e-15);
     }
 }

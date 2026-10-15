@@ -22,6 +22,16 @@ robot-dynamics = { path = "crates/robot-dynamics", default-features = false }
 robot-golden = { path = "crates/robot-golden" }
 robot-model = { path = "crates/robot-model" }
 
+# The configuration document's file format: `robot_parameters.json` is read with
+# `serde_json`'s parser and written with its pretty printer, which is the one Rust
+# formatter whose output matches Python's `json.dumps(indent=2)` byte for byte.
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+# Native file dialogs for the Parameters tab's Save/Load/Browse buttons. `rfd`'s default
+# feature set is the one that picks the platform's own dialog backend.
+rfd = "0.17.2"
+
 [profile.release]
 # The kinematics core is destined for a real-time control loop; keep it fast and
 # keep the arithmetic it emits predictable.

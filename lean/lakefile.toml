@@ -58,3 +58,13 @@ root = "ForceTorqueTestData"
 [[lean_exe]]
 name = "kinematics_test_data"
 root = "KinematicsTestData"
+
+# Evaluates the branch and degeneracy decisions over the rationals - the reachability band
+# compared in Q(sqrt rho) with the radical isolated and squared with sign care, the shoulder
+# anchor, the fold-back and the wrist singularity - and writes
+# ../test_data/branch_plans.json. Read-only with respect to the `R` proofs it imports, and not
+# in `defaultTargets`, for the same reason as the other two generators: it is data, not a
+# proof, and `lake exe` compiles it on demand.
+[[lean_exe]]
+name = "branch_decision_q"
+root = "BranchDecisionQ"

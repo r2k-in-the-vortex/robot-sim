@@ -78,9 +78,9 @@ fn rotations() -> Vec<Rotation<R>> {
         rot_x((3, 5), (4, 5)),
         rot_y((5, 13), (12, 13)),
         rot_z((8, 17), (15, 17)),
-        rot_z((0, 1), (1, 1)),   // a quarter turn about z
-        rot_x((-1, 1), (0, 1)),  // a half turn about x: the first square root of the identity
-        rot_y((0, 1), (-1, 1)),  // a quarter turn the other way about y
+        rot_z((0, 1), (1, 1)),  // a quarter turn about z
+        rot_x((-1, 1), (0, 1)), // a half turn about x: the first square root of the identity
+        rot_y((0, 1), (-1, 1)), // a quarter turn the other way about y
         rot_x((3, 5), (4, 5)) * rot_z((8, 17), (15, 17)),
         rot_z((0, 1), (1, 1)) * rot_x((0, 1), (1, 1)),
     ]
@@ -256,10 +256,7 @@ fn virtual_work_invariant() {
                 for (m, t) in twists().into_iter().enumerate() {
                     let sensor_work = virtual_work(tip_to_sensor(p, r, w), t);
                     let tip_work = virtual_work(w, sensor_twist_to_tip(p, r, t));
-                    assert_eq!(
-                        sensor_work, tip_work,
-                        "p[{i}] R[{j}] w[{k}] t[{m}]"
-                    );
+                    assert_eq!(sensor_work, tip_work, "p[{i}] R[{j}] w[{k}] t[{m}]");
                 }
             }
         }
@@ -329,10 +326,7 @@ fn mul_vec_cross() {
     for r in rotations() {
         for u in vectors() {
             for q in vectors() {
-                assert_eq!(
-                    r.mul_vec(u.cross(q)),
-                    r.mul_vec(u).cross(r.mul_vec(q))
-                );
+                assert_eq!(r.mul_vec(u.cross(q)), r.mul_vec(u).cross(r.mul_vec(q)));
             }
         }
     }
@@ -378,10 +372,7 @@ fn mul_vec_dot_product() {
     for r in rotations() {
         for u in vectors() {
             for q in vectors() {
-                assert_eq!(
-                    r.mul_vec(u).dot(q),
-                    u.dot(r.transpose_mul_vec(q))
-                );
+                assert_eq!(r.mul_vec(u).dot(q), u.dot(r.transpose_mul_vec(q)));
                 assert_eq!(r.mul_vec(u).dot(r.mul_vec(q)), u.dot(q));
             }
         }
@@ -399,10 +390,7 @@ fn cross_dot_product_eq_det() {
     for u in vectors() {
         for q in vectors() {
             for w in vectors() {
-                assert_eq!(
-                    u.cross(q).dot(w),
-                    Mat3::from_cols(block(u, q, w)).det()
-                );
+                assert_eq!(u.cross(q).dot(w), Mat3::from_cols(block(u, q, w)).det());
             }
         }
     }
@@ -765,13 +753,7 @@ fn spatial_inertial_wrench_add() {
                     let (m1, h1, i1) = (one.mass(), first_moment(one), origin_inertia(one));
                     let (m2, h2, i2) = (two.mass(), first_moment(two), origin_inertia(two));
                     assert_eq!(
-                        spatial_inertial_wrench(
-                            m1 + m2,
-                            h1 + h2,
-                            mat_add(i1, i2),
-                            t,
-                            acc
-                        ),
+                        spatial_inertial_wrench(m1 + m2, h1 + h2, mat_add(i1, i2), t, acc),
                         spatial_inertial_wrench(m1, h1, i1, t, acc)
                             + spatial_inertial_wrench(m2, h2, i2, t, acc)
                     );
@@ -792,8 +774,7 @@ fn spatial_gravity_wrench_add() {
                 let (m2, h2) = (two.mass(), first_moment(two));
                 assert_eq!(
                     spatial_gravity_wrench(m1 + m2, h1 + h2, g),
-                    spatial_gravity_wrench(m1, h1, g)
-                        + spatial_gravity_wrench(m2, h2, g)
+                    spatial_gravity_wrench(m1, h1, g) + spatial_gravity_wrench(m2, h2, g)
                 );
             }
         }
@@ -872,15 +853,7 @@ fn measured_wrench_at_rest() {
             for mp in bodies() {
                 for g in gravities() {
                     assert_eq!(
-                        measured_wrench(
-                            p,
-                            r,
-                            mp,
-                            Twist::zero(),
-                            Accel::zero(),
-                            g,
-                            Wrench::zero()
-                        ),
+                        measured_wrench(p, r, mp, Twist::zero(), Accel::zero(), g, Wrench::zero()),
                         -gravity_wrench(tip_mass_to_sensor(p, r, mp), g)
                     );
                 }
@@ -930,15 +903,8 @@ fn recovered_contact_wrench_at_rest() {
         for r in rotations() {
             for mp in bodies() {
                 for g in gravities() {
-                    let measured = measured_wrench(
-                        p,
-                        r,
-                        mp,
-                        Twist::zero(),
-                        Accel::zero(),
-                        g,
-                        Wrench::zero(),
-                    );
+                    let measured =
+                        measured_wrench(p, r, mp, Twist::zero(), Accel::zero(), g, Wrench::zero());
                     assert_eq!(
                         recovered_contact_wrench(
                             p,

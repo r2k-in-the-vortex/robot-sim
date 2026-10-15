@@ -93,15 +93,7 @@ pub fn carrier_pose_cs<S: Field>(
     let t4 = t3 * j[3];
     let t5 = t4 * j[4];
     let t6 = t5 * j[5];
-    [
-        Pose::identity(),
-        j[0],
-        j[0] * j[1],
-        t3,
-        t4,
-        t5,
-        t6,
-    ]
+    [Pose::identity(), j[0], j[0] * j[1], t3, t4, t5, t6]
 }
 
 /// Frames 0 to 3, from angles in radians. See [`arm_pose_cs`].
@@ -156,7 +148,9 @@ pub fn arm_rotation_cs<S: Field>(
     let quarter = CosSin::<S>::quarter_turn();
     // Left-associated, as Lean writes it; the product is associative in the
     // mathematics and the bracketing only fixes the floating-point rounding.
-    Mat3::rot_z_cs(theta1) * Mat3::rot_x_cs(quarter) * Mat3::rot_z_cs(theta2.then(theta3))
+    Mat3::rot_z_cs(theta1)
+        * Mat3::rot_x_cs(quarter)
+        * Mat3::rot_z_cs(theta2.then(theta3))
         * Mat3::rot_x_cs(quarter)
 }
 
@@ -167,7 +161,11 @@ pub fn arm_rotation_cs<S: Field>(
 /// `alpha4 = 90`, `alpha5 = -90` twists conjugate the three z rotations into a ball
 /// joint, and it is the reason the wrist reads as ZYZ rather than ZXZ.
 #[inline]
-pub fn wrist_rotation_cs<S: Field>(theta4: CosSin<S>, theta5: CosSin<S>, theta6: CosSin<S>) -> Mat3<S> {
+pub fn wrist_rotation_cs<S: Field>(
+    theta4: CosSin<S>,
+    theta5: CosSin<S>,
+    theta6: CosSin<S>,
+) -> Mat3<S> {
     Mat3::rot_z_cs(theta4) * Mat3::rot_y_cs(theta5.negated()) * Mat3::rot_z_cs(theta6)
 }
 
@@ -255,14 +253,7 @@ mod tests {
         let g = Geometry::<f64>::shipped();
         // Joint 2's static offset is 90 degrees, so "zero runtime angles" is not the
         // zero angle vector. This is exactly the trap the offset exists to represent.
-        let theta = [
-            0.0,
-            total_angle(90.0, 0.0),
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ];
+        let theta = [0.0, total_angle(90.0, 0.0), 0.0, 0.0, 0.0, 0.0];
         let tower = carrier_pose(&g, &theta);
         let expected = [
             (0.0, 0.0, 0.0),

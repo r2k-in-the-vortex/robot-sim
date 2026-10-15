@@ -1,19 +1,32 @@
 # Six-axis robot arm simulator
 
-A Python desktop application that simulates a 6-axis articulated robot arm. It
-draws the arm as a chain of Denavit–Hartenberg frames in an interactive 3D view,
-can overlay an STL mesh on the base and on each joint, and moves the arm either
-joint by joint or by jogging the end effector in Cartesian space. Cartesian and
-rotation jogs are solved with a closed-form inverse kinematics derived for this
-arm's structure.
+A desktop application that simulates a 6-axis articulated robot arm. It draws the
+arm as a chain of Denavit–Hartenberg frames in an interactive 3D view, can overlay
+an STL mesh on the base and on each joint, and moves the arm either joint by joint
+or by jogging the end effector in Cartesian space. Cartesian and rotation jogs are
+solved with a closed-form inverse kinematics derived for this arm's structure.
 
-The mathematics behind the simulator is written out in
-[`mathematics.md`](mathematics.md) and proved in Lean under [`lean/`](lean) — see
-[Mathematics](#mathematics) below.
+The mathematics behind it is written out in [`mathematics.md`](mathematics.md) and
+proved in Lean under [`lean/`](lean) — see [Mathematics](#mathematics) below.
+
+There are two implementations. The **Rust** one under [`crates/`](crates) is the
+one being developed: it has a GPU renderer, a kinematics core built for a real-time
+control loop, and a force/torque sensor model that the Python never had. The
+**Python** one (`simulator.py`, `kinematics.py`) is the original, kept as a
+reference and as a frozen regression oracle — its behaviour is the contract the Rust
+matches, and it still passes its own suite unchanged.
 
 ![main window](doc/main_window_image.png)
 
 ## Run
+
+### Rust
+
+```powershell
+cargo run -p robot-app --release
+```
+
+### Python
 
 Install the Python dependencies and launch the viewport:
 
@@ -109,13 +122,20 @@ The derivation is in the *Inverse kinematics* section of
 
 | Path | Contents |
 | --- | --- |
-| `simulator.py` | Tkinter application: 3D view, jog controls, parameter tabs, JSON configuration |
-| `kinematics.py` | DH transforms, forward kinematics, closed-form inverse kinematics |
+| `crates/robot-kinematics` | DH transforms, forward kinematics, closed-form inverse kinematics |
+| `crates/robot-dynamics` | Wrench frame algebra, gravity and inertia compensation |
+| `crates/robot-model` | Parameter types and `robot_parameters.json` persistence |
+| `crates/robot-app` | Bevy + egui desktop application |
+| `crates/robot-golden` | Exact rational arithmetic and the Lean numeral format, for tests |
+| `xtask` | `cargo xtask gen-golden` / `check-golden` |
+| `docs/verification.md` | What is proved, what is tested, and what is neither |
+| `simulator.py` | The original Tkinter application, kept as a reference |
+| `kinematics.py` | The original DH transforms and closed-form inverse kinematics |
 | `mathematics.md` | Derivations: forward and inverse kinematics, force/torque sensor dynamics |
 | `lean/` | Lean formalisation and proofs of the same mathematics |
 | `robot_parameters.json` | Default DH and mesh configuration |
 | `mesh/` | Example STL meshes to load into the view |
-| `test_data/` | Generated ground truth for the force/torque tests |
+| `test_data/` | Generated ground truth, produced by the Lean generators |
 | `test_kinematics.py`, `test_force_torque.py` | Python test suites |
 
 ## Mathematics
@@ -173,11 +193,57 @@ Much of `test_kinematics.py` drives real Tk widgets, so those tests skip
 themselves when there is no display. `test_force_torque.py` re-derives every
 number in `test_data/force_torque_frames.json` (schema 3, including the
 `dynamics_cases` section) from the case inputs in exact rational arithmetic.
-Regenerate that file with, from `lean/`:
+
+The Rust suites go further, because they can: the forward chain, the wrench
+algebra and the dynamics are polynomials in their inputs, so they evaluate exactly
+over the rationals and are checked against the generated vectors with `==` and no
+tolerance at all. The forward chain manages this because every `alpha` in the arm's
+fixed twist pattern is a quarter turn — cosine `0`, sine `1`, both exact — and
+because the chain reads each joint angle only through its cosine and sine, so
+supplying those as data makes the whole thing polynomial. The angle-valued parts
+cannot be treated this way, since `atan2` and `arccos` are irrational outside a
+handful of cases; those are covered by restating the Lean theorems as executable
+properties instead. [`docs/verification.md`](docs/verification.md) sets out the
+whole boundary, including what is deliberately not attempted.
 
 ```powershell
-lake exe force_torque_test_data
+cargo test --workspace          # everything, including the exact comparisons
+cargo xtask gen-golden          # regenerate test_data/ from the Lean generators
+cargo xtask check-golden        # regenerate and fail if the committed data has drifted
 ```
 
-CI runs both toolchains in independent jobs: the Python suite under `xvfb-run`,
-and `lake build` over the Lean libraries in `defaultTargets`.
+`check-golden` takes minutes rather than seconds: the Lean generators re-derive
+each case by evaluation before writing anything, and that check sweep dominates.
+
+CI runs three independent jobs: the Python suite under `xvfb-run`, the Rust
+workspace, and `lake build` over the Lean libraries in `defaultTargets`. The Lean
+job also regenerates the ground truth and fails if it differs from what is
+committed — the Rust and Python suites both read the committed files and never
+regenerate them, so without that step the data could drift from the Lean that
+produced it while every suite kept passing on stale numbers.
+
+## Where the Rust deliberately differs from the Python
+
+Three changes are intentional rather than oversights, and all are visible.
+
+**Mesh scale.** `simulator.py` applies no scale factor to the STL meshes at all,
+so the meshes and the DH table never actually lined up: the shipped meshes are in
+millimetres and span hundreds, while the DH dimensions are tens. The Rust applies a
+factor of `0.1`, which is what makes a loaded mesh sit on the arm. The shipped
+`robot_parameters.json` has every mesh path empty, so nothing loads at startup in
+either implementation until a mesh is chosen.
+
+**Gizmo checkboxes.** In `simulator.py` the labels and the things they toggle are
+off by one: the checkbox labelled *J1* toggles the **base** gizmo, *J2* toggles J1,
+and so on to *Tool/Flange*, which toggles J6. The render side is right and the
+labels are wrong. The Rust labels them to match what they toggle.
+
+**Save and Load ask for a file.** `simulator.py` has no chooser for either: both
+read and write `Path(__file__).with_name("robot_parameters.json")`, the file beside
+the script, and report through a message box. A compiled binary has no script
+directory to anchor that to, so the Rust starts at the same name — beside the
+executable, then in the working directory, then beside the executable — and opens
+whatever the user picks. The bytes written are unaffected, apart from line endings:
+Python's `write_text` is text mode, so it turns the newlines into CRLF on Windows,
+while the Rust writes `json.dumps(data, indent=2) + "\n"` as-is. Both read either
+form back.

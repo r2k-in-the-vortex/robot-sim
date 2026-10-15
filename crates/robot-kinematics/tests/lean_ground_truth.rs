@@ -103,8 +103,7 @@ fn pairs(value: &Value, case: &str) -> [CosSin<R>; 6] {
     assert_eq!(array.len(), 6, "{case}: the arm has six joints");
     core::array::from_fn(|i| {
         let component = |key: &str| {
-            numeral_at(&array[i], key)
-                .unwrap_or_else(|error| panic!("{case}: joint {i}: {error}"))
+            numeral_at(&array[i], key).unwrap_or_else(|error| panic!("{case}: joint {i}: {error}"))
         };
         CosSin::new(component("cos"), component("sin"))
     })
@@ -132,9 +131,7 @@ fn expected_mat3(value: &Value) -> Mat3<R> {
 
 /// A 4x4 matrix, row-major, in the layout `Pose::to_matrix4` returns.
 fn expected_matrix4(value: &Value) -> [[R; 4]; 4] {
-    let rows = value
-        .as_array()
-        .expect("a homogeneous matrix is four rows");
+    let rows = value.as_array().expect("a homogeneous matrix is four rows");
     assert_eq!(rows.len(), 4, "a homogeneous matrix has four rows");
     core::array::from_fn(|i| {
         let row = rows[i].as_array().expect("a homogeneous matrix row");
@@ -173,7 +170,12 @@ fn fk_matches_the_lean_pose() {
 fn the_sixth_carrier_pose_is_the_forward_kinematics() {
     for case in cases() {
         let tower = carrier_pose_cs(&case.geometry, &case.theta);
-        assert_eq!(tower[6], fk_cs(&case.geometry, &case.theta), "{}", case.name);
+        assert_eq!(
+            tower[6],
+            fk_cs(&case.geometry, &case.theta),
+            "{}",
+            case.name
+        );
         assert_eq!(
             tower[6],
             expected_pose(&case.expected["fk"]),
@@ -236,7 +238,10 @@ fn the_wrist_center_can_sit_on_the_frame_one_origin() {
             case.name
         );
     }
-    assert!(witnessed > 0, "the corpus witnesses the coincidence nowhere");
+    assert!(
+        witnessed > 0,
+        "the corpus witnesses the coincidence nowhere"
+    );
 }
 
 /// `Pose::to_matrix4` on every frame, against the homogeneous matrices Lean wrote —
@@ -304,7 +309,12 @@ fn every_rotation_the_chain_produces_is_a_rotation() {
                 "{}: frame {i} is not orthogonal",
                 case.name
             );
-            assert_eq!(frame.r.det(), R::ONE, "{}: frame {i} is not a rotation", case.name);
+            assert_eq!(
+                frame.r.det(),
+                R::ONE,
+                "{}: frame {i} is not a rotation",
+                case.name
+            );
         }
     }
 }

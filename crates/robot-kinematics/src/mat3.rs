@@ -23,8 +23,8 @@ impl<S: Field> Mat3<S> {
     pub const fn from_rows(rows: [[S; 3]; 3]) -> Self {
         Self {
             entries: [
-                rows[0][0], rows[0][1], rows[0][2], rows[1][0], rows[1][1], rows[1][2],
-                rows[2][0], rows[2][1], rows[2][2],
+                rows[0][0], rows[0][1], rows[0][2], rows[1][0], rows[1][1], rows[1][2], rows[2][0],
+                rows[2][1], rows[2][2],
             ],
         }
     }
@@ -89,11 +89,7 @@ impl<S: Field> Mat3<S> {
     /// The matrix-vector product, Lean's `M *ᵥ v`.
     #[inline]
     pub fn mul_vec(self, v: Vec3<S>) -> Vec3<S> {
-        Vec3::new(
-            self.row(0).dot(v),
-            self.row(1).dot(v),
-            self.row(2).dot(v),
-        )
+        Vec3::new(self.row(0).dot(v), self.row(1).dot(v), self.row(2).dot(v))
     }
 
     /// The determinant, by the rule of Sarrus. `fk_R_det` says the chain's rotation has
@@ -175,7 +171,6 @@ impl<S: Field> Mat3<S> {
             [S::zero(), S::zero(), S::one()],
         ])
     }
-
 }
 
 /// The operations that need a square root or a transcendental, and therefore cannot be

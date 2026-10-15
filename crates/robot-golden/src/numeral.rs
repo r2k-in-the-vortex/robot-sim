@@ -39,9 +39,7 @@ impl core::fmt::Display for NumeralError {
 
 /// Read one numeral.
 pub fn numeral(value: &Value) -> Result<Ratio, NumeralError> {
-    let text = value
-        .as_str()
-        .ok_or(NumeralError::NotAString("value"))?;
+    let text = value.as_str().ok_or(NumeralError::NotAString("value"))?;
     parse(text)
 }
 
@@ -119,7 +117,10 @@ pub fn entries<'a>(document: &'a Value, key: &str) -> Result<&'a Vec<Value>, Num
 
 /// The `name` field of a record, used to report which case failed.
 pub fn name(record: &Value) -> &str {
-    record.get("name").and_then(Value::as_str).unwrap_or("<unnamed>")
+    record
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("<unnamed>")
 }
 
 #[cfg(test)]
@@ -138,15 +139,15 @@ mod tests {
     fn a_json_number_is_rejected_rather_than_rounded() {
         // The whole point of the string format: a bare number would have gone through a
         // float already. This must be an error, not a silent conversion.
-        assert_eq!(
-            numeral(&json!(0.5)),
-            Err(NumeralError::NotAString("value"))
-        );
+        assert_eq!(numeral(&json!(0.5)), Err(NumeralError::NotAString("value")));
     }
 
     #[test]
     fn a_zero_denominator_is_rejected() {
-        assert!(matches!(parse("1/0"), Err(NumeralError::ZeroDenominator(_))));
+        assert!(matches!(
+            parse("1/0"),
+            Err(NumeralError::ZeroDenominator(_))
+        ));
     }
 
     #[test]

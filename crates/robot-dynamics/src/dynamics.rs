@@ -199,10 +199,7 @@ pub fn first_moment<S: Field>(mp: MassProperties<S>) -> Vec3<S> {
 #[inline]
 pub fn parallel_axis_inertia<S: Field>(mass: S, com: Vec3<S>) -> Mat3<S> {
     let square = com.dot(com);
-    matrix_scale(
-        matrix_sub(matrix_scale(Mat3::identity(), square), outer(com, com)),
-        mass,
-    )
+    (Mat3::identity().scale(square) - Mat3::outer(com, com)).scale(mass)
 }
 
 /// The inertia tensor about the *frame origin* rather than about the centre of mass, Lean's
@@ -213,10 +210,7 @@ pub fn parallel_axis_inertia<S: Field>(mass: S, com: Vec3<S>) -> Mat3<S> {
 /// mass is the one thing that does *not* add, because it needs a division to combine.
 #[inline]
 pub fn origin_inertia<S: Field>(mp: MassProperties<S>) -> Mat3<S> {
-    matrix_add(
-        mp.inertia(),
-        parallel_axis_inertia(mp.mass(), mp.com()),
-    )
+    mp.inertia() + parallel_axis_inertia(mp.mass(), mp.com())
 }
 
 /// The tip's acceleration in tip coordinates, from the sensor's twist and acceleration: Lean's
@@ -324,11 +318,7 @@ pub fn spatial_inertial_wrench<S: Field>(
 /// The gravity wrench in the additive form, Lean's `spatialGravityWrench`: the force is `m g` and
 /// the moment is `h × g`, the centre of mass appearing only through the first moment.
 #[inline]
-pub fn spatial_gravity_wrench<S: Field>(
-    mass: S,
-    first_moment: Vec3<S>,
-    g: Vec3<S>,
-) -> Wrench<S> {
+pub fn spatial_gravity_wrench<S: Field>(mass: S, first_moment: Vec3<S>, g: Vec3<S>) -> Wrench<S> {
     Wrench::new(g.scale(mass), first_moment.cross(g))
 }
 
@@ -377,54 +367,6 @@ pub fn recovered_contact_wrench<S: Field>(
         r,
         measured - inertial_wrench(distal, t, acc) + gravity_wrench(distal, g),
     )
-}
-
-// The kinematics crate's `Mat3` carries the product and the transpose, which is all the chain
-// machinery needs. The Newton-Euler equations need entry-wise arithmetic as well; these three
-// helpers supply it here rather than widening the frozen kinematics API.
-
-/// `left + right`, entry-wise.
-fn matrix_add<S: Field>(left: Mat3<S>, right: Mat3<S>) -> Mat3<S> {
-    let mut sum = left;
-    for i in 0..3 {
-        for j in 0..3 {
-            sum.set(i, j, left.at(i, j) + right.at(i, j));
-        }
-    }
-    sum
-}
-
-/// `left - right`, entry-wise.
-fn matrix_sub<S: Field>(left: Mat3<S>, right: Mat3<S>) -> Mat3<S> {
-    let mut difference = left;
-    for i in 0..3 {
-        for j in 0..3 {
-            difference.set(i, j, left.at(i, j) - right.at(i, j));
-        }
-    }
-    difference
-}
-
-/// `matrix * factor`, entry-wise.
-fn matrix_scale<S: Field>(matrix: Mat3<S>, factor: S) -> Mat3<S> {
-    let mut scaled = matrix;
-    for i in 0..3 {
-        for j in 0..3 {
-            scaled.set(i, j, matrix.at(i, j) * factor);
-        }
-    }
-    scaled
-}
-
-/// The outer product `u vᵀ`, Lean's `Matrix.vecMulVec`.
-fn outer<S: Field>(u: Vec3<S>, v: Vec3<S>) -> Mat3<S> {
-    let mut product = Mat3::zero();
-    for i in 0..3 {
-        for j in 0..3 {
-            product.set(i, j, u[i] * v[j]);
-        }
-    }
-    product
 }
 
 #[cfg(test)]
@@ -476,7 +418,10 @@ mod tests {
             "inertialWrench_zero"
         );
         assert_eq!(gravity_wrench(body(), Vec3::zero()), Wrench::zero());
-        assert_eq!(com_accel(body(), Twist::zero(), Accel::zero()), Vec3::zero());
+        assert_eq!(
+            com_accel(body(), Twist::zero(), Accel::zero()),
+            Vec3::zero()
+        );
     }
 
     #[test]
@@ -515,13 +460,7 @@ mod tests {
         let acc = Accel::new(vec3(0, 2, 1), vec3(1, 0, -1));
         assert_eq!(
             inertial_wrench(mp, t, acc),
-            spatial_inertial_wrench(
-                mp.mass(),
-                first_moment(mp),
-                origin_inertia(mp),
-                t,
-                acc
-            )
+            spatial_inertial_wrench(mp.mass(), first_moment(mp), origin_inertia(mp), t, acc)
         );
         assert_eq!(
             gravity_wrench(mp, vec3(0, 0, -1)),

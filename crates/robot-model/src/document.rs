@@ -1,9 +1,9 @@
 //! The whole configuration document, mirroring `robot_parameters.json`.
 
-use crate::mesh::MESH_COUNT;
-use crate::dh::DHParameters;
-use crate::mesh::MeshSettings;
 use crate::FRAME_COUNT;
+use crate::dh::DHParameters;
+use crate::mesh::MESH_COUNT;
+use crate::mesh::MeshSettings;
 
 /// The only `schema_version` this shape describes.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -69,7 +69,12 @@ mod tests {
         assert_eq!(document.schema_version, SCHEMA_VERSION);
         assert!(!document.show_mesh_edges);
         assert!(document.show_joint_labels);
-        assert!(document.show_coordinate_gizmos.iter().all(|visible| *visible));
+        assert!(
+            document
+                .show_coordinate_gizmos
+                .iter()
+                .all(|visible| *visible)
+        );
         assert!(document.meshes.iter().all(|mesh| !mesh.is_drawn()));
     }
 

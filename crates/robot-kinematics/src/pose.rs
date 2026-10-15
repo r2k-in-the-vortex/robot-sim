@@ -8,9 +8,9 @@
 
 use crate::angle::CosSin;
 use crate::mat3::Mat3;
-use core::ops::Mul;
 use crate::scalar::{Field, Scalar};
 use crate::vec3::Vec3;
+use core::ops::Mul;
 
 /// A rigid pose: the rotation carrying a frame's coordinates to the base frame, and its
 /// origin expressed in the base frame.
@@ -42,9 +42,24 @@ impl<S: Field> Pose<S> {
     #[inline]
     pub fn to_matrix4(self) -> [[S; 4]; 4] {
         [
-            [self.r.at(0, 0), self.r.at(0, 1), self.r.at(0, 2), self.p.x()],
-            [self.r.at(1, 0), self.r.at(1, 1), self.r.at(1, 2), self.p.y()],
-            [self.r.at(2, 0), self.r.at(2, 1), self.r.at(2, 2), self.p.z()],
+            [
+                self.r.at(0, 0),
+                self.r.at(0, 1),
+                self.r.at(0, 2),
+                self.p.x(),
+            ],
+            [
+                self.r.at(1, 0),
+                self.r.at(1, 1),
+                self.r.at(1, 2),
+                self.p.y(),
+            ],
+            [
+                self.r.at(2, 0),
+                self.r.at(2, 1),
+                self.r.at(2, 2),
+                self.p.z(),
+            ],
             [S::zero(), S::zero(), S::zero(), S::one()],
         ]
     }
@@ -90,7 +105,6 @@ impl<S: Field> Pose<S> {
             Self::dh_translation_cs(theta, d, a),
         )
     }
-
 }
 
 impl<S: Field> Mul for Pose<S> {

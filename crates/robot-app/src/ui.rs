@@ -1,9 +1,10 @@
 //! The egui shell: the tab strip, the 3D view's side panel and the parameter pages.
 //!
 //! The two top-level tabs and the parameter sub-tabs are the reference layout
-//! (`simulator.py:186-188` for the tabs, `:438-441` for the sub-tabs). The tables here
-//! display the document read-only: editing, validation, file load/save and the jog
-//! controls are WS5's, and each one is marked where it goes.
+//! (`simulator.py:186-188` for the tabs, `:438-441` for the sub-tabs). The tables here are
+//! editable and every button is wired: the fields live in [`crate::session`], which owns the
+//! operations they drive and the rules about which of them take effect when, and this module
+//! only lays them out and calls across.
 //!
 //! The 3D view is not an egui widget. This module measures the rect the renderer leaves
 //! free and publishes it in [`Viewport`]; `main.rs` points the camera at that rect and
@@ -14,11 +15,15 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, egui};
-use robot_kinematics::Pose;
+use robot_kinematics::{JOINT_COUNT, Pose};
+use robot_model::Document;
 use robot_model::{AXIS_FRAME_NAMES, FRAME_COUNT, MESH_FRAME_NAMES};
 
 use crate::camera::OrbitCamera;
+use crate::dialogs;
+use crate::jog::Axis;
 use crate::scene::{GIZMO_LENGTH_FRACTION, LABEL_COLOR, LABEL_LIFT_FRACTION, LinkMeshes};
+use crate::session::{self, INVALID_PARAMETERS_TITLE, Session, rotation_to_rpy_degrees};
 use crate::{RobotState, ViewState};
 
 /// The two tabs of `simulator.py:188-189`.
@@ -72,6 +77,7 @@ pub fn draw_shell(
     mut parameter_tab: ResMut<ParameterTab>,
     mut view: ResMut<ViewState>,
     mut robot: ResMut<RobotState>,
+    mut session: ResMut<Session>,
     link_meshes: Res<LinkMeshes>,
     mut viewport: ResMut<Viewport>,
 ) -> Result {
@@ -115,11 +121,15 @@ pub fn draw_shell(
         Tab::View => {
             let controls = egui::Panel::left("view_controls")
                 .default_size(240.0)
-                .show(&mut root, |ui| view_controls(ui, &mut view))
+                .show(&mut root, |ui| {
+                    view_controls(ui, &mut view, &mut robot, &mut session)
+                })
                 .response
                 .rect;
             let readout = egui::Panel::bottom("pose_readout")
-                .show(&mut root, |ui| pose_readout(ui, &robot, &link_meshes))
+                .show(&mut root, |ui| {
+                    pose_readout(ui, &robot, &link_meshes, &mut session)
+                })
                 .response
                 .rect;
             central.min.x = controls.max.x;
@@ -140,9 +150,18 @@ pub fn draw_shell(
             page.painter()
                 .rect_filled(central, 0.0, page.style().visuals.panel_fill);
             page.add_space(8.0);
-            parameter_page(&mut page, &mut parameter_tab, &mut robot, &link_meshes);
+            parameter_page(
+                &mut page,
+                &mut parameter_tab,
+                &mut robot,
+                &mut session,
+                &link_meshes,
+            );
         }
     }
+
+    // The messagebox the reference raises inside its handlers (`simulator.py:673, 708, 821`).
+    draw_notice(&mut root, &mut session);
 
     let scale = window.scale_factor();
     viewport.points = central;
@@ -158,12 +177,21 @@ pub fn draw_shell(
     Ok(())
 }
 
-/// The 3D view's side panel.
+/// The 3D view's side panel: the camera controls, then `simulator.py:229-277`'s jog panel.
 ///
-/// Only the view's own controls are here. `simulator.py:230-277` puts the jog controls in
-/// the same place, which is WS5's half; the placeholder keeps the layout stable until
-/// then.
-fn view_controls(ui: &mut egui::Ui, view: &mut ViewState) {
+/// # Text fields, not drag values
+///
+/// The reference's step boxes and angle boxes are `ttk.Spinbox` widgets, which are editable
+/// text with arrows. egui has no spinbox, and a [`egui::DragValue`] would be a different
+/// interaction *and* a different failure model: it cannot hold `"abc"`, so the reference's
+/// own complaints — "Joint step must be a finite positive angle." — would become unreachable.
+/// Keeping the fields as text keeps the validation the port is supposed to reproduce.
+fn view_controls(
+    ui: &mut egui::Ui,
+    view: &mut ViewState,
+    robot: &mut RobotState,
+    session: &mut Session,
+) {
     ui.add_space(4.0);
     ui.heading("View");
     ui.label("Left-drag orbits, right-drag pans, the wheel zooms.");
@@ -178,40 +206,227 @@ fn view_controls(ui: &mut egui::Ui, view: &mut ViewState) {
     ui.separator();
 
     ui.heading("Jog");
-    ui.add_enabled(false, egui::Button::new("Joint jogs"));
-    ui.add_enabled(false, egui::Button::new("Base frame"));
-    ui.add_enabled(false, egui::Button::new("Tool frame"));
-    ui.label(egui::RichText::new("Jog controls land with WS5.").small());
+    ui.add_space(2.0);
+    egui::Grid::new("jog_steps")
+        .num_columns(2)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            ui.label("Jog step");
+            step_field(ui, &mut session.jog_step);
+            ui.end_row();
+            ui.label("Rotation step");
+            step_field(ui, &mut session.rotation_step);
+            ui.end_row();
+        });
+    ui.add_space(6.0);
+
+    // `simulator.py:251-256`'s two frame groups, in its order.
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        frame_jog_buttons(
+            ui,
+            "Base frame",
+            session,
+            robot,
+            Session::jog_cartesian,
+            Session::jog_rotation_world,
+        );
+    });
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        frame_jog_buttons(
+            ui,
+            "Tool frame",
+            session,
+            robot,
+            Session::jog_tool_translation,
+            Session::jog_rotation_tool,
+        );
+    });
+    ui.add_space(6.0);
+
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.label(egui::RichText::new("Joint jogs").strong());
+        ui.horizontal(|ui| {
+            ui.label("Joint step");
+            step_field(ui, &mut session.joint_step);
+            ui.separator();
+            for joint in 0..JOINT_COUNT {
+                ui.vertical(|ui| {
+                    ui.label(format!("J{}", joint + 1));
+                    ui.horizontal(|ui| {
+                        if ui.small_button("-").clicked() {
+                            session.jog_joint(
+                                joint,
+                                -1,
+                                &mut robot.document,
+                                &mut robot.runtime_angles_deg,
+                            );
+                        }
+                        if ui.small_button("+").clicked() {
+                            session.jog_joint(
+                                joint,
+                                1,
+                                &mut robot.document,
+                                &mut robot.runtime_angles_deg,
+                            );
+                        }
+                    });
+                    // `_sync_joint_angle_views`'s front readout (`simulator.py:325`).
+                    ui.label(
+                        egui::RichText::new(format!("{:.1}°", robot.runtime_angles_deg[joint]))
+                            .small(),
+                    );
+                });
+            }
+        });
+    });
+
+    ui.add_space(4.0);
+    ui.label(session.status.as_str());
 }
 
-/// The pose and mesh status under the view (`simulator.py:969-976`).
-fn pose_readout(ui: &mut egui::Ui, robot: &RobotState, link_meshes: &LinkMeshes) {
-    ui.add_space(2.0);
-    match robot
-        .document
-        .parameters
-        .carrier_pose(&robot.runtime_angles_deg)
-    {
-        Ok(poses) => {
-            let tool = poses[FRAME_COUNT - 1];
-            let (roll, pitch, yaw) = rpy_degrees(&tool);
-            ui.label(format!(
-                "T6 position: X {:.3}   Y {:.3}   Z {:.3}",
-                tool.p.x(),
-                tool.p.y(),
-                tool.p.z()
-            ));
-            ui.label(format!(
-                "Orientation RPY (ZYX, deg): roll {roll:.1}   pitch {pitch:.1}   yaw {yaw:.1}"
-            ));
-        }
-        Err(error) => {
-            ui.colored_label(egui::Color32::from_rgb(0xc0, 0x39, 0x2b), error.to_string());
-        }
+/// One step box, sized like the reference's `width=6` spinboxes.
+fn step_field(ui: &mut egui::Ui, text: &mut String) {
+    ui.add(egui::TextEdit::singleline(text).desired_width(56.0));
+}
+
+/// One frame group's six translation buttons and six rotation buttons,
+/// `_build_frame_jog_buttons` (`simulator.py:278-296`).
+///
+/// The reference's column arithmetic — `axis * 2 + (1 if direction > 0 else 0)` over
+/// `((-1, "-"), (1, "+"))` — is a grid layout; the order it produces is what matters here,
+/// so the row reads X−, X+, Y−, Y+, Z−, Z+.
+fn frame_jog_buttons(
+    ui: &mut egui::Ui,
+    title: &str,
+    session: &mut Session,
+    robot: &mut RobotState,
+    translate: fn(&mut Session, Axis, i32, &mut Document, &mut [f64; JOINT_COUNT]),
+    rotate: fn(&mut Session, Axis, i32, &mut Document, &mut [f64; JOINT_COUNT]),
+) {
+    ui.label(egui::RichText::new(title).strong());
+    for translating in [true, false] {
+        ui.horizontal(|ui| {
+            for axis in Axis::ALL {
+                for direction in [-1, 1] {
+                    let suffix = if direction < 0 { "-" } else { "+" };
+                    let label = if translating {
+                        format!("{}{suffix}", axis.letter())
+                    } else {
+                        format!("R{}{suffix}", axis.letter())
+                    };
+                    if ui.small_button(label).clicked() {
+                        if translating {
+                            translate(
+                                session,
+                                axis,
+                                direction,
+                                &mut robot.document,
+                                &mut robot.runtime_angles_deg,
+                            );
+                        } else {
+                            rotate(
+                                session,
+                                axis,
+                                direction,
+                                &mut robot.document,
+                                &mut robot.runtime_angles_deg,
+                            );
+                        }
+                    }
+                }
+            }
+        });
     }
-    // `simulator.py:962-965`.
-    ui.label(link_meshes.status.as_str());
+}
+
+/// The pose and mesh status under the view (`simulator.py:969-976`), plus `Copy XYZ`.
+fn pose_readout(
+    ui: &mut egui::Ui,
+    robot: &RobotState,
+    link_meshes: &LinkMeshes,
+    session: &mut Session,
+) {
     ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            let pose = robot
+                .document
+                .parameters
+                .carrier_pose(&robot.runtime_angles_deg);
+            match pose {
+                Ok(poses) => {
+                    let tool = poses[FRAME_COUNT - 1];
+                    let (roll, pitch, yaw) = rpy_degrees(&tool);
+                    ui.label(format!(
+                        "T6 position: X {:.3}   Y {:.3}   Z {:.3}",
+                        tool.p.x(),
+                        tool.p.y(),
+                        tool.p.z()
+                    ));
+                    ui.label(format!(
+                        "Orientation RPY (ZYX, deg): roll {roll:.1}   pitch {pitch:.1}   yaw {yaw:.1}"
+                    ));
+                }
+                Err(error) => {
+                    ui.colored_label(egui::Color32::from_rgb(0xc0, 0x39, 0x2b), error.to_string());
+                }
+            }
+            // `simulator.py:962-965`.
+            ui.label(link_meshes.status.as_str());
+        });
+
+        // Right-aligned, as the reference packs it (`simulator.py:205-207`).
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+            if ui.button("Copy XYZ").clicked() {
+                copy_xyz(ui, robot, session);
+            }
+        });
+    });
+    ui.add_space(2.0);
+}
+
+/// Put the T6 pose on the clipboard, `_copy_t6_position` (`simulator.py:297-316`).
+///
+/// egui's clipboard is enough: bevy_egui manages it through `arboard` by default, so
+/// `Context::copy_text` needs no dependency of its own.
+fn copy_xyz(ui: &egui::Ui, robot: &RobotState, session: &mut Session) {
+    match Session::copy_xyz_text(&robot.document.parameters, &robot.runtime_angles_deg) {
+        Ok(text) => {
+            ui.ctx().copy_text(text);
+            session.status = String::from(session::COPIED);
+        }
+        // The reference has nothing to say here: `forward_kinematics` in Python accepts any
+        // table, so its `Copy XYZ` cannot fail the way a table with no geometry does here.
+        Err(message) => session.show_notice(INVALID_PARAMETERS_TITLE, message),
+    }
+}
+
+/// The pending messagebox, if any.
+///
+/// A modal window with one button, which is as close as an immediate-mode frame gets to
+/// `messagebox.showerror`: the reference's handler blocks until it is dismissed, and this one
+/// keeps the notice up until the user presses OK.
+fn draw_notice(root: &mut egui::Ui, session: &mut Session) {
+    let Some(failure) = session.notice.clone() else {
+        return;
+    };
+    let mut dismissed = false;
+    egui::Window::new(failure.title)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(root.ctx(), |ui| {
+            ui.label(failure.message.as_str());
+            ui.add_space(6.0);
+            ui.vertical_centered(|ui| {
+                if ui.button("OK").clicked() {
+                    dismissed = true;
+                }
+            });
+        });
+    if dismissed {
+        session.notice = None;
+    }
 }
 
 /// The Parameters tab: its sub-tabs and their pages.
@@ -219,6 +434,7 @@ fn parameter_page(
     ui: &mut egui::Ui,
     parameter_tab: &mut ParameterTab,
     robot: &mut RobotState,
+    session: &mut Session,
     link_meshes: &LinkMeshes,
 ) {
     ui.horizontal(|ui| {
@@ -227,13 +443,13 @@ fn parameter_page(
     });
     ui.separator();
     egui::ScrollArea::vertical().show(ui, |ui| match parameter_tab {
-        ParameterTab::Dh => dh_page(ui, robot),
-        ParameterTab::Meshes => mesh_page(ui, robot, link_meshes),
+        ParameterTab::Dh => dh_page(ui, robot, session),
+        ParameterTab::Meshes => mesh_page(ui, robot, session, link_meshes),
     });
 }
 
 /// `simulator.py:443-508`.
-fn dh_page(ui: &mut egui::Ui, robot: &mut RobotState) {
+fn dh_page(ui: &mut egui::Ui, robot: &mut RobotState, session: &mut Session) {
     ui.add_space(4.0);
     ui.heading("Denavit–Hartenberg parameters");
     ui.label("Theta offset and joint angle are in degrees; d and a use consistent length units.");
@@ -255,29 +471,51 @@ fn dh_page(ui: &mut egui::Ui, robot: &mut RobotState) {
             }
             ui.end_row();
 
-            for (joint, row) in robot.document.parameters.joints.iter().enumerate() {
+            for joint in 0..JOINT_COUNT {
                 ui.label(format!("J{}", joint + 1));
-                ui.label(format!("{}", row.theta_offset_deg));
-                // The runtime angle is the one editable value the reference writes back
-                // (`simulator.py:466-470`); WS5 replaces this label with its spinbox.
-                ui.label(format!("{}", robot.runtime_angles_deg[joint]));
-                ui.label(format!("{}", row.d));
-                ui.label(format!("{}", row.a));
-                ui.label(format!("{}", row.alpha_deg));
+                // The columns are theta, joint angle, d, a, alpha, in that order, while the
+                // stored row is (theta, d, a, alpha): the runtime angle sits in the middle
+                // of the row on screen but is not one of the DH values. It is kept in its
+                // own field list, which is what the display-precision split in
+                // [`Session::read_joint_angles`] turns on — an edited angle field must not
+                // round the five it was not asked about.
+                let [theta, d, a, alpha] = &mut session.dh[joint];
+                ui.add(egui::TextEdit::singleline(theta).desired_width(96.0));
+                ui.add(
+                    egui::TextEdit::singleline(&mut session.joint_angles[joint])
+                        .desired_width(96.0),
+                );
+                ui.add(egui::TextEdit::singleline(d).desired_width(96.0));
+                ui.add(egui::TextEdit::singleline(a).desired_width(96.0));
+                ui.add(egui::TextEdit::singleline(alpha).desired_width(96.0));
                 ui.end_row();
             }
         });
 
     ui.add_space(12.0);
     ui.horizontal(|ui| {
-        ui.add_enabled(false, egui::Button::new("Apply to View"));
-        ui.add_enabled(false, egui::Button::new("Save JSON"));
-        ui.add_enabled(false, egui::Button::new("Load JSON"));
+        if ui.button("Apply to View").clicked() {
+            if let Err(failure) =
+                session.apply_from_entries(&mut robot.document, &mut robot.runtime_angles_deg)
+            {
+                session.notice = Some(failure);
+            }
+        }
+        if ui.button("Save JSON").clicked() {
+            save_json(session, robot);
+        }
+        if ui.button("Load JSON").clicked() {
+            load_json(session, robot);
+        }
     });
     ui.label(
-        egui::RichText::new(
-            "Joint angles start at zero and are not saved. The buttons land with WS5.",
-        )
+        egui::RichText::new(format!(
+            "File: {} · Joint angles start at zero and are not saved.",
+            session
+                .config_path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+        ))
         .small(),
     );
     ui.add_space(10.0);
@@ -285,12 +523,38 @@ fn dh_page(ui: &mut egui::Ui, robot: &mut RobotState) {
     ui.separator();
     show_joint_labels(ui, robot);
     ui.add_space(4.0);
+    gizmo_checkboxes(ui, robot);
+}
+
+/// "Coordinate gizmos", `simulator.py:496-508`.
+///
+/// **Deviation.** The reference labels these seven boxes from `AXIS_FRAME_NAMES` —
+/// `("J1", …, "J6", "Tool/Flange")`, the names of the *axes* each frame carries — while the
+/// list it zips over is indexed in render order, which is `("Base", "J1", …, "J6")`, the
+/// names of the *bodies* each frame holds. The two lists are shifted by one and disagree at
+/// both ends, so the box the reference labels "J1" is the one that shows and hides the
+/// **base** gizmo, and the box labelled "Tool/Flange" is J6's. The boxes here are labelled
+/// with [`MESH_FRAME_NAMES`], so each one names the frame whose gizmo it actually toggles.
+///
+/// The drawn labels over the 3D view keep the reference's axis naming, which is correct
+/// there: the gizmo at frame `i` draws frame `i`'s axes, and frame `i` carries joint `i+1`'s
+/// axis, which is exactly what `simulator.py:39-41` says the list is for.
+fn gizmo_checkboxes(ui: &mut egui::Ui, robot: &mut RobotState) {
     ui.label("Coordinate gizmos");
+    let mut visibility = robot.document.show_coordinate_gizmos;
+    let mut changed = false;
     ui.horizontal_wrapped(|ui| {
-        for (frame, name) in AXIS_FRAME_NAMES.iter().enumerate() {
-            ui.checkbox(&mut robot.document.show_coordinate_gizmos[frame], *name);
+        for (frame, name) in MESH_FRAME_NAMES.iter().enumerate() {
+            if ui.checkbox(&mut visibility[frame], *name).changed() {
+                changed = true;
+            }
         }
     });
+    // Written back only on a click, so the resource is not marked changed every frame and
+    // the mesh-edge system is not dragged along with it. See [`show_joint_labels`].
+    if changed {
+        robot.document.show_coordinate_gizmos = visibility;
+    }
 }
 
 /// "Show joint labels in 3D View" (`simulator.py:490-495`).
@@ -308,8 +572,35 @@ fn show_joint_labels(ui: &mut egui::Ui, robot: &mut RobotState) {
     }
 }
 
+/// Save through a chooser, then report the way `_save_json` does.
+fn save_json(session: &mut Session, robot: &mut RobotState) {
+    let Some(path) = dialogs::save_config(&session.config_path) else {
+        return;
+    };
+    match session.save_json(&mut robot.document, &path) {
+        Ok(message) => session.show_notice("Parameters saved", message),
+        Err(failure) => session.notice = Some(failure),
+    }
+}
+
+/// Load through a chooser, then report the way `_load_json` does.
+fn load_json(session: &mut Session, robot: &mut RobotState) {
+    let Some(path) = dialogs::load_config(&session.config_path) else {
+        return;
+    };
+    let angles = robot.runtime_angles_deg;
+    if let Err(failure) = session.load_json(&mut robot.document, &angles, &path) {
+        session.notice = Some(failure);
+    }
+}
+
 /// `simulator.py:510-573`.
-fn mesh_page(ui: &mut egui::Ui, robot: &mut RobotState, link_meshes: &LinkMeshes) {
+fn mesh_page(
+    ui: &mut egui::Ui,
+    robot: &mut RobotState,
+    session: &mut Session,
+    link_meshes: &LinkMeshes,
+) {
     ui.add_space(4.0);
     ui.heading("Frame-attached STL meshes");
     ui.label("Offsets use model length units. Rotations are local X, then Y, then Z, in degrees.");
@@ -325,32 +616,29 @@ fn mesh_page(ui: &mut egui::Ui, robot: &mut RobotState, link_meshes: &LinkMeshes
     ui.add_space(6.0);
 
     egui::Grid::new("mesh_table")
-        .num_columns(9)
-        .spacing([10.0, 4.0])
+        .num_columns(10)
+        .spacing([8.0, 4.0])
         .show(ui, |ui| {
             for heading in [
-                "Frame", "STL file", "Offset X", "Offset Y", "Offset Z", "Rot X", "Rot Y", "Rot Z",
-                "Opacity",
+                "Frame", "STL file", "", "Offset X", "Offset Y", "Offset Z", "Rot X", "Rot Y",
+                "Rot Z", "Opacity",
             ] {
                 ui.label(egui::RichText::new(heading).strong());
             }
             ui.end_row();
 
-            for (frame, setting) in robot.document.meshes.iter().enumerate() {
+            for (frame, form) in session.meshes.iter_mut().enumerate() {
                 ui.label(MESH_FRAME_NAMES[frame]);
-                let path = if setting.path.is_empty() {
-                    "—"
-                } else {
-                    setting.path.as_str()
-                };
-                ui.label(path);
-                for axis in setting.offset {
-                    ui.label(format!("{axis}"));
+                ui.add(egui::TextEdit::singleline(&mut form.path).desired_width(220.0));
+                if ui.button("Browse…").clicked() {
+                    if let Some(path) = dialogs::pick_stl(&form.path) {
+                        form.path = path.to_string_lossy().into_owned();
+                    }
                 }
-                for angle in setting.rotation_deg {
-                    ui.label(format!("{angle}"));
+                for field in form.offset.iter_mut().chain(form.rotation.iter_mut()) {
+                    ui.add(egui::TextEdit::singleline(field).desired_width(56.0));
                 }
-                ui.label(format!("{}", setting.opacity));
+                ui.add(egui::TextEdit::singleline(&mut form.opacity).desired_width(48.0));
                 ui.end_row();
             }
         });
@@ -360,10 +648,17 @@ fn mesh_page(ui: &mut egui::Ui, robot: &mut RobotState, link_meshes: &LinkMeshes
     ui.label(link_meshes.status.as_str());
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        ui.add_enabled(false, egui::Button::new("Apply Meshes"));
-        ui.add_enabled(false, egui::Button::new("Save JSON"));
+        if ui.button("Apply Meshes").clicked() {
+            if let Err(failure) =
+                session.apply_from_entries(&mut robot.document, &mut robot.runtime_angles_deg)
+            {
+                session.notice = Some(failure);
+            }
+        }
+        if ui.button("Save JSON").clicked() {
+            save_json(session, robot);
+        }
     });
-    ui.label(egui::RichText::new("Editing meshes lands with WS5.").small());
 }
 
 /// Paint the per-frame names over the 3D view, lifted off each origin as
@@ -433,18 +728,11 @@ pub fn project(camera: &OrbitCamera, viewport: egui::Rect, point: [f64; 3]) -> e
 
 /// Roll, pitch, yaw for `R = Rz(yaw) · Ry(pitch) · Rx(roll)`, in degrees.
 ///
-/// Transcribed from `simulator.py:45-57`, including its gimbal-lock branch: at pitch
-/// ±90° the roll and yaw axes coincide, the yaw is taken from the second row instead and
-/// the roll is reported as zero.
+/// The extraction itself lives in [`crate::session`], beside the `Copy XYZ` button that also
+/// needs it; this is the readout's spelling of the same answer.
 pub fn rpy_degrees(pose: &Pose<f64>) -> (f64, f64, f64) {
-    let at = |row: usize, column: usize| pose.r.at(row, column);
-    let pitch = (-at(2, 0)).atan2(at(0, 0).hypot(at(1, 0)));
-    let (roll, yaw) = if at(0, 0).hypot(at(1, 0)) > 1e-9 {
-        (at(2, 1).atan2(at(2, 2)), at(1, 0).atan2(at(0, 0)))
-    } else {
-        (0.0, (-at(0, 1)).atan2(at(1, 1)))
-    };
-    (roll.to_degrees(), pitch.to_degrees(), yaw.to_degrees())
+    let [roll, pitch, yaw] = rotation_to_rpy_degrees(pose);
+    (roll, pitch, yaw)
 }
 
 fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {

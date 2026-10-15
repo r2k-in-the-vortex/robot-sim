@@ -23,3 +23,8 @@ robot-kinematics = { workspace = true, features = ["std"] }
 bevy = "=0.20.0"
 bevy_egui = "=0.43.1"
 stl_io = "=0.11.0"
+
+# The Parameters tab's Save/Load/Browse buttons. The clipboard needs no extra crate:
+# egui's `Context::copy_text` reaches `arboard` through bevy_egui's default
+# `manage_clipboard` feature, which is already on.
+rfd = { workspace = true }

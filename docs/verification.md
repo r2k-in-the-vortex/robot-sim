@@ -129,28 +129,51 @@ Lean decides degeneracy with exact predicates: `r ≠ 0`, membership in `Set.Icc
 `sin θ5 ≠ 0`. `f64` cannot, so every tolerance-bearing decision is confined to one
 trigonometry-free module, `branch.rs`, which turns a handful of scalars into a branch plan.
 
-Every predicate in that module reduces to a comparison that is exact over the rationals:
-`hypot(x,y) = 0` holds exactly when both are zero, and the reachability band squares into
-rational comparisons. `lean/BranchDecisionQ.lean` restates that layer over `ℚ` — leaving
-the `ℝ` development unmodified — so the Rust branch plan can be compared `==` against
-branch plans Lean computed exactly, rather than against thresholds documented as standing
-in for Lean's predicates.
+Most predicates in that module are exactly rational: `hypot(x,y) = 0` holds exactly when
+both are zero, so the wrist-singularity test needs no square root at all, and `r = 0` and
+the fold-back condition are direct comparisons.
+
+**The reachability band is not.** `elbowCosine` involves `q² + h²`, and with
+`q = σ·r − a₁` that expands to `ρ − 2σ·a₁·r + a₁² + h²`, where `ρ = x₄² + y₄²` is rational
+but `r = √ρ` is not. So the band test is a comparison in the quadratic extension
+**ℚ(√ρ)**, not in ℚ. It is still exact and still decidable — carry `(rational part,
+radical coefficient, ρ)` and compare `α + β√ρ` against a bound by isolating the radical and
+squaring with sign care — but the radical has to be carried, and an earlier draft of this
+document claimed otherwise.
+
+`lean/BranchDecisionQ.lean` restates that layer accordingly — leaving the `ℝ` development
+unmodified — so the Rust branch plan is compared `==` against branch plans Lean computed
+exactly, rather than against thresholds documented as standing in for Lean's predicates.
 
 That is the layer where the exact-predicate/float-tolerance gap actually bites, and it is
 the layer where the comparison is strongest.
 
-### Precision separation
+### Precision separation — designed, not built
 
-The core is generic over `Scalar`, so the same property suite can be re-run at ~200 bits.
-A property that fails at `f64` but holds at high precision is a rounding artefact; one that
-fails at both is an algorithmic mistake. This is a diagnostic that `f64`-only testing cannot
-provide.
+The intent is to re-run the property suite at ~200 bits, so that a property failing at
+`f64` but holding at high precision is identifiable as a rounding artefact and one failing
+at both is an algorithmic mistake. **This is not built, and the obstacle is a decision made
+earlier in this port rather than an oversight.**
 
-It exists for tests only. **Production is plain `f64` and nothing else** — the port has to
-be adaptable to a real-time control loop, which means ordinary floating-point arithmetic
-with predictable codegen. Generic code monomorphised at `f64` is exactly that, so the trait
-costs nothing at runtime; it is not a licence to do arithmetic in any other type on a
-control path.
+`Scalar` is sealed to `f64` and `f32` inside `robot-kinematics`, on the reasoning that a
+fourth instantiation nobody exercises weakens the argument about which ones the suite
+covers. That seal also stops a test crate from supplying a high-precision scalar, and
+`solutions`/`solve` need `Scalar` because they take square roots and read angles. `Field`
+is open, which is why the exact `Ratio` corpus works, but the rational type has no
+transcendentals and so cannot stand in here.
+
+Two ways to unblock it, neither taken: implement the high-precision type *inside*
+`robot-kinematics` behind a test-only feature, keeping the seal; or open the seal and
+accept that `Scalar` means "a real number at some precision" by convention rather than by
+construction. The first preserves the invariant and costs a dependency — the mature option
+is GMP-backed, which is awkward on Windows; the second is two lines and gives the invariant
+up.
+
+What production does is unaffected either way. **Production is plain `f64` and nothing
+else** — the port has to be adaptable to a real-time control loop, which means ordinary
+floating-point arithmetic with predictable codegen. Generic code monomorphised at `f64` is
+exactly that, so the trait costs nothing at runtime; it is not a licence to do arithmetic
+in any other type on a control path.
 
 ## The boundary, stated plainly
 
@@ -183,5 +206,5 @@ Not proved, and not claimed:
 | Branch and degeneracy decisions | Lean-generated exact branch plans | `==`, no tolerance |
 | Angles (`atan2`, `arccos`, `sin`, `cos`) | Restated Lean theorems as properties | Tolerance, but the theorem names the property |
 | Panic-freedom, index bounds, overflow | Kani over the fixed-capacity buffers | Bounded model check |
-| Rounding versus algorithmic error | Same suite at ~200 bits | Diagnostic, test-only |
+| Rounding versus algorithmic error | Same suite at ~200 bits | **Not built** — blocked by the sealed `Scalar` |
 | `f64` equals `ℝ` | — | Not attempted, and not attemptable today |

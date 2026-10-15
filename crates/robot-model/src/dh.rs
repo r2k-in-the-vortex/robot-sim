@@ -1,6 +1,6 @@
 //! The DH table and the conversions out of it.
 
-use robot_kinematics::{units, Geometry, GeometryError, Pose, FRAME_COUNT, JOINT_COUNT};
+use robot_kinematics::{FRAME_COUNT, Geometry, GeometryError, JOINT_COUNT, Pose, units};
 
 /// One row of the DH table, in the units the document stores.
 ///

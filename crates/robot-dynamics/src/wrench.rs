@@ -287,11 +287,7 @@ fn within<S: Field>(left: Mat3<S>, right: Mat3<S>, tolerance: S) -> bool {
 /// the torque picks up the moment `p × F` the lever arm contributes. That second term is why
 /// the wrench transform is the dual of the twist transform and not the same map.
 #[inline]
-pub fn tip_to_sensor<S: Field>(
-    p: Vec3<S>,
-    r: Rotation<S>,
-    tip_wrench: Wrench<S>,
-) -> Wrench<S> {
+pub fn tip_to_sensor<S: Field>(p: Vec3<S>, r: Rotation<S>, tip_wrench: Wrench<S>) -> Wrench<S> {
     let force = r.mul_vec(tip_wrench.force);
     let torque = r.mul_vec(tip_wrench.torque) + p.cross(force);
     Wrench::new(force, torque)
@@ -304,11 +300,7 @@ pub fn tip_to_sensor<S: Field>(
 /// `Rᵀ` undoes the rotation and `- p × F` removes the moment the lever arm contributed, which
 /// is exactly the term `tipToSensor` added: the two are mutual inverses given orthogonality.
 #[inline]
-pub fn sensor_to_tip<S: Field>(
-    p: Vec3<S>,
-    r: Rotation<S>,
-    sensor_wrench: Wrench<S>,
-) -> Wrench<S> {
+pub fn sensor_to_tip<S: Field>(p: Vec3<S>, r: Rotation<S>, sensor_wrench: Wrench<S>) -> Wrench<S> {
     let force = r.transpose_mul_vec(sensor_wrench.force);
     let torque = r.transpose_mul_vec(sensor_wrench.torque - p.cross(sensor_wrench.force));
     Wrench::new(force, torque)
@@ -433,20 +425,23 @@ mod tests {
         let rotated = quarter_turn_z().mul_vec(vec3(1, 0, 0));
         assert_eq!(rotated, vec3(0, 1, 0));
         // and the inverse brings it back: `transpose_mul_vec` is `mul_vec` of `ρ⁻¹`
-        assert_eq!(
-            quarter_turn_z().transpose_mul_vec(rotated),
-            vec3(1, 0, 0)
-        );
+        assert_eq!(quarter_turn_z().transpose_mul_vec(rotated), vec3(1, 0, 0));
     }
 
     #[test]
     fn virtual_work_is_the_force_dot_velocity_plus_the_torque_dot_omega() {
         assert_eq!(
-            virtual_work(wrench([1, 0, 0], [0, 0, 0]), Twist::new(vec3(3, 0, 0), Vec3::zero())),
+            virtual_work(
+                wrench([1, 0, 0], [0, 0, 0]),
+                Twist::new(vec3(3, 0, 0), Vec3::zero())
+            ),
             R::integer(3)
         );
         assert_eq!(
-            virtual_work(wrench([0, 0, 0], [0, 0, 2]), Twist::new(Vec3::zero(), vec3(0, 5, 0))),
+            virtual_work(
+                wrench([0, 0, 0], [0, 0, 2]),
+                Twist::new(Vec3::zero(), vec3(0, 5, 0))
+            ),
             R::zero()
         );
     }
@@ -455,7 +450,13 @@ mod tests {
     fn a_twist_at_the_origin_of_a_rotated_frame_keeps_its_angular_part() {
         // R = 1, p = 0: neither transform does anything at all.
         let t = Twist::new(vec3(1, 2, 3), vec3(-1, 0, 1));
-        assert_eq!(sensor_twist_to_tip(Vec3::zero(), Rotation::identity(), t), t);
-        assert_eq!(tip_twist_to_sensor(Vec3::zero(), Rotation::identity(), t), t);
+        assert_eq!(
+            sensor_twist_to_tip(Vec3::zero(), Rotation::identity(), t),
+            t
+        );
+        assert_eq!(
+            tip_twist_to_sensor(Vec3::zero(), Rotation::identity(), t),
+            t
+        );
     }
 }

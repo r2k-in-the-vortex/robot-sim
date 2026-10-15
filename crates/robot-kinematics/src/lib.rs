@@ -41,25 +41,39 @@
 extern crate std;
 
 pub mod angle;
+pub mod branch;
 pub mod chain;
 pub mod geometry;
+pub mod ik;
 pub mod mat3;
 pub mod pose;
 pub mod scalar;
 pub mod solution;
 pub mod units;
 pub mod vec3;
+pub mod zyz;
 
 pub use angle::{AnglesCosSin, CosSin};
+pub use branch::{
+    BranchPlan, Degeneracy, ElbowBranches, ExactTarget, ShoulderPlan, Tolerances, WristBranches,
+    WristPlan, candidate_count, le_of_radical, radical_eq_zero, wrist_plan, wrist_plan_exact,
+};
 pub use chain::{
     Angles, PlanarTarget, arm_pose, arm_pose_cs, arm_rotation, arm_rotation_cs, carrier_pose,
     carrier_pose_cs, elbow_cosine, fk, fk_cs, pairs, planar_target, wrist_center, wrist_pose,
     wrist_pose_cs, wrist_rotation, wrist_rotation_cs,
 };
 pub use geometry::{Geometry, GeometryError};
+pub use ik::{solutions, solve};
 pub use mat3::Mat3;
 pub use pose::Pose;
 pub use scalar::{Field, Scalar};
 pub use solution::{MAX_SOLUTIONS, Solution, SolutionSet};
-pub use units::{FRAME_COUNT, JOINT_COUNT, deg_to_rad, rad_to_deg, runtime_angle, total_angle, wrap_angle};
+pub use units::{
+    FRAME_COUNT, JOINT_COUNT, deg_to_rad, rad_to_deg, runtime_angle, total_angle, wrap_angle,
+};
 pub use vec3::Vec3;
+pub use zyz::{
+    WristAngles, cosine_third_entry, hypot_third_column, read_theta4, read_theta5, read_theta6,
+    read_theta6_flat, reconstruct, reconstruct_flat, reconstruct_mirror,
+};

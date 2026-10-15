@@ -103,7 +103,10 @@ fn a_pythagorean_configuration_gives_an_exact_pose() {
     // `fractions.Fraction` transcription of the same DH table, not a re-run of the
     // Rust. Agreement between two implementations in different languages and different
     // arithmetic is the point; an expectation read off this code would prove nothing.
-    assert_eq!(pose.p, Vec3::new(rational(424, 13), rational(318, 13), rational(-50, 13)));
+    assert_eq!(
+        pose.p,
+        Vec3::new(rational(424, 13), rational(318, 13), rational(-50, 13))
+    );
 
     let expected = [
         [rational(4, 13), rational(3, 5), rational(-48, 65)],

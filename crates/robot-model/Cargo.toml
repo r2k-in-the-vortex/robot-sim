@@ -11,3 +11,11 @@ repository.workspace = true
 # The `std` feature is what provides the `Scalar` impl for `f64` (the workspace
 # dependency turns `default-features` off), so it is required here and in robot-app.
 robot-kinematics = { workspace = true, features = ["std"] }
+
+serde = { workspace = true }
+# The `raw_value` feature adds `RawValue`, which is how `persist` keeps a number as the
+# text it was written as. serde_json's own `Value` refuses a number that overflows `f64`
+# ("number out of range"), where the reference's `float()` turns it into an infinity and
+# then reports it through the finite-value checks; reading through `RawValue` is what keeps
+# those checks reachable. The feature is additive — it only adds the type.
+serde_json = { workspace = true, features = ["raw_value"] }
