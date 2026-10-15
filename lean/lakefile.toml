@@ -1,6 +1,6 @@
 name = "robot_arm"
 version = "0.1.0"
-defaultTargets = ["TorqueWrench"]
+defaultTargets = ["TorqueWrench", "Kinematics"]
 
 [[require]]
 name = "mathlib"
@@ -9,6 +9,12 @@ rev = "v4.35.0"
 
 [[lean_lib]]
 name = "TorqueWrench"
+
+# Forward kinematics of the supported arm: poses, the DH transform, the chain, the planar
+# reduction, the wrist's ZYZ entries and the angle congruence that `InverseKinematics.lean`
+# will build on. See the TODO at the end of it for the one structural fact still missing.
+[[lean_lib]]
+name = "Kinematics"
 
 # Evaluates the transforms on the exact-rational cases and writes
 # ../test_data/force_torque_frames.json. Not in `defaultTargets`: `lake build` stays a
