@@ -5,6 +5,7 @@ module
 public import Mathlib.Analysis.Real.Sqrt
 public import Mathlib.Analysis.SpecialFunctions.Complex.Arg
 public import Mathlib.Analysis.SpecialFunctions.Trigonometric.Angle
+public import Mathlib.Analysis.SpecialFunctions.Trigonometric.Inverse
 public import Mathlib.Basic.Complex.Basic
 public import Mathlib.Basic.Real.Basic
 public import Mathlib.Tactic.Ring
@@ -92,6 +93,16 @@ coordinates. -/
 theorem norm_mk (x y : ℝ) : ‖(⟨x, y⟩ : ℂ)‖ = hypot x y := by
   rw [Complex.norm_def, Complex.normSq_mk, hypot,
     show x * x + y * y = x ^ 2 + y ^ 2 by ring]
+
+/-- Scaling a `(cos θ, sin θ)` pair scales its length by `|c|`: the factor squares out of the
+sum of squares, and `cos² + sin²` leaves `c²`, whose square root is `|c|`. The absolute value
+is not a technicality - a length cannot remember the sign of the factor - and it is what makes
+the solver's radial distance, a `hypot` of a link vector multiplied by `(cos θ, sin θ)`,
+collapse to the length of that vector. -/
+theorem hypot_mul_cos_sin (c θ : ℝ) :
+    hypot (c * Real.cos θ) (c * Real.sin θ) = |c| := by
+  rw [hypot, mul_pow, mul_pow, ← mul_add, Real.cos_sq_add_sin_sq, mul_one,
+    Real.sqrt_sq_eq_abs]
 
 /-! ## Reading `atan2` off `Complex.arg` -/
 
@@ -306,5 +317,109 @@ theorem atan2_rotate_coe_angle {q h u v θ : ℝ} (hu : (u, v) ≠ (0, 0))
     rw [← arg_cos_sin_mk_coe_angle (atan2 h q - atan2 v u), hcancel, arg_cos_sin_mk_coe_angle θ]
   rw [Real.Angle.coe_sub] at hangle
   rw [← hangle, sub_add_cancel]
+
+/-! ## Scaling the pair, and the round trips that read an angle back
+
+The closed-form solver never holds an angle it did not read off a pair of coordinates, and it
+reads them through a link length: a positive factor has to leave the angle alone, a negative
+one has to cost exactly a half turn, and a pair that really is `(cos θ, sin θ)` has to give `θ`
+back. `Real.arccos` closes the same loop for the elbow, where the solver computes a cosine and
+has to recover the angle it came from, sign included; the last two lemmas are that pair of
+signs.
+-/
+
+/-- Multiplying both coordinates by a positive constant does not move the angle of the pair: a
+positive factor is a stretch with no direction of its own, so as a complex factor it
+contributes `arg c = 0` to the argument of the product. No non-vanishing hypothesis is needed -
+unlike `atan2_neg_coe_angle` there is no reflection here whose direction the origin could fail
+to have, and at the origin both sides are `atan2 0 0 = 0`. This is what lets the solver read an
+angle off a pair that has been multiplied by a link length. -/
+theorem atan2_pos_mul_coe_angle {y x c : ℝ} (hc : 0 < c) :
+    (atan2 (c * y) (c * x) : Real.Angle) = (atan2 y x : Real.Angle) := by
+  rcases eq_or_ne (x, y) (0, 0) with h0 | h0
+  · -- At the origin both sides are `atan2 0 0 = 0`, so there is nothing to add a half turn to.
+    have hx : x = 0 := by simpa using congrArg Prod.fst h0
+    have hy : y = 0 := by simpa using congrArg Prod.snd h0
+    rw [hx, hy, mul_zero]
+  · -- The scaled pair is `(c : ℂ)` times the pair, and `arg` of a product is the sum of the
+    -- factors' arguments, of which `c`'s is `0`.
+    rw [atan2, atan2,
+      show (⟨c * x, c * y⟩ : ℂ) = (c : ℂ) * (⟨x, y⟩ : ℂ) from by
+        apply Complex.ext <;> simp [Complex.mul_re, Complex.mul_im],
+      Complex.arg_mul_coe_angle (Complex.ofReal_ne_zero.mpr (ne_of_gt hc)) (mk_ne_zero h0),
+      Complex.arg_ofReal_of_nonneg hc.le]
+    exact zero_add _
+
+/-- Multiplying both coordinates by a negative constant is the positive stretch of `-c`
+followed by the reflection through the origin, so the angle comes back with a half turn added.
+The hypothesis on the pair is genuinely needed here, in a way its positive twin does not need
+it: at the origin the right-hand side would be `π` while `atan2 0 0 = 0`, the reflection having
+no direction to preserve. -/
+theorem atan2_neg_mul_coe_angle {y x c : ℝ} (hc : c < 0) (h : (x, y) ≠ (0, 0)) :
+    (atan2 (c * y) (c * x) : Real.Angle) = (atan2 y x : Real.Angle) + Real.pi := by
+  have hc' : 0 < -c := neg_pos.mpr hc
+  -- `c * y = -((-c) * y)` turns the negative scale into the positive one followed by
+  -- `atan2_neg_coe_angle`, whose own hypothesis `((-c) * x, (-c) * y) ≠ (0, 0)` follows from
+  -- `h` and `-c ≠ 0`.
+  have hne : ((-c) * x, (-c) * y) ≠ (0, 0) := by
+    intro h0
+    refine h (Prod.ext ?_ ?_)
+    · exact (mul_eq_zero.mp (by simpa using congrArg Prod.fst h0)).resolve_left (ne_of_gt hc')
+    · exact (mul_eq_zero.mp (by simpa using congrArg Prod.snd h0)).resolve_left (ne_of_gt hc')
+  rw [show c * y = -((-c) * y) by ring, show c * x = -((-c) * x) by ring,
+    atan2_neg_coe_angle hne, atan2_pos_mul_coe_angle hc']
+
+/-- A pair that really is `(cos θ, sin θ)` reads back as `θ`: the pair is the unit-circle point
+at angle `θ`, whose `Complex.arg` is `θ` modulo a full turn. This is `wrap_coe_angle` in the
+spelling the solver uses - the normalisation it drops has nothing to correct - stated for a
+caller that never mentions `wrap`. -/
+theorem atan2_cos_sin_coe_angle (θ : ℝ) :
+    (atan2 (Real.sin θ) (Real.cos θ) : Real.Angle) = (θ : Real.Angle) := by
+  rw [atan2]
+  exact arg_cos_sin_mk_coe_angle θ
+
+/-- `arccos (cos ψ)` is the angle in `[0, π]` that `ψ` reduces to modulo a full turn, so it is
+`ψ` or `-ψ` there, and the sign of `sin ψ` decides which: with `sin ψ ≥ 0` the arccos lands on
+`ψ` itself. The closed form's elbow step is literally `ε * Real.arccos (elbowCosine …)` with
+`ε = ±1`, so this is what turns the `ε = +1` branch back into the direction it was meant to
+name. -/
+theorem arccos_cos_coe_angle_of_nonneg {ψ : ℝ} (h : 0 ≤ Real.sin ψ) :
+    (Real.arccos (Real.cos ψ) : Real.Angle) = (ψ : Real.Angle) := by
+  -- The arccos has the cosine of `ψ` by definition, and its sine is `√(1 - cos²ψ)`, which is
+  -- `√(sin²ψ)`: the hypothesis says that root is `sin ψ` and not `|sin ψ|`. With the sine and
+  -- the cosine both matched, the `(cos, sin)` pair is the pair of `ψ`, and a `(cos, sin)` pair
+  -- reads back as its own angle.
+  have hcos : Real.cos (Real.arccos (Real.cos ψ)) = Real.cos ψ :=
+    Real.cos_arccos (Real.neg_one_le_cos ψ) (Real.cos_le_one ψ)
+  have hsin : Real.sin (Real.arccos (Real.cos ψ)) = Real.sin ψ := by
+    rw [Real.sin_arccos,
+      show 1 - Real.cos ψ ^ 2 = Real.sin ψ ^ 2 by
+        rw [← Real.sin_sq_add_cos_sq ψ]; ring,
+      Real.sqrt_sq_eq_abs, abs_of_nonneg h]
+  rw [← atan2_cos_sin_coe_angle (Real.arccos (Real.cos ψ)), hcos, hsin,
+    atan2_cos_sin_coe_angle ψ]
+
+/-- The other sign of the elbow's round trip: with `sin ψ ≤ 0` the arccos has to be negated to
+land back on `ψ`, which is the `ε = -1` branch of the solver's elbow step. The proof runs the
+nonnegative-sine lemma on `-ψ`, where the sine flips sign and the cosine does not, so the `-`
+the arccos would have dropped reappears in front of it. That `-arccos (cos ψ)` reaches `-π`
+when `ψ` is an odd multiple of `π` - a value `atan2` never returns - is exactly why the
+statement is one about `Real.Angle`, where the two ends of the range are the same angle.
+
+The hypotheses of this lemma and of `arccos_cos_coe_angle_of_nonneg` overlap at `sin ψ = 0`:
+both hold there and both statements are true, as they must be, since a zero sine carries no
+sign for the branch to select. -/
+theorem arccos_cos_coe_angle_of_nonpos {ψ : ℝ} (h : Real.sin ψ ≤ 0) :
+    (-Real.arccos (Real.cos ψ) : Real.Angle) = (ψ : Real.Angle) := by
+  have h' : 0 ≤ Real.sin (-ψ) := by
+    rw [Real.sin_neg]
+    exact neg_nonneg.mpr h
+  -- `arccos (cos ψ) = -ψ` as angles, since `cos (-ψ) = cos ψ` and the pair of real angles
+  -- `-ψ` and `ψ` coerce to opposite angles. The goal's negation is the one of `Real.Angle`
+  -- (the ascription in the statement is what puts it there), so negating h2 twice is the step
+  -- that removes it.
+  have h2 := arccos_cos_coe_angle_of_nonneg (ψ := -ψ) h'
+  rw [Real.cos_neg, Real.Angle.coe_neg] at h2
+  rw [h2, neg_neg]
 
 end RealAtan2

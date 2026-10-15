@@ -10,9 +10,10 @@ rev = "v4.35.0"
 [[lean_lib]]
 name = "TorqueWrench"
 
-# Forward kinematics of the supported arm: poses, the DH transform, the chain, the planar
-# reduction, the wrist's ZYZ entries and the angle congruence that `InverseKinematics.lean`
-# builds on.
+# Forward kinematics of the supported arm: poses, the DH transform, the chain and its
+# cumulative frames (the tower `kinematics.py`'s `forward_kinematics` returns and the
+# simulator draws), the planar reduction, the wrist's ZYZ entries and the angle congruence
+# that `InverseKinematics.lean` builds on.
 [[lean_lib]]
 name = "Kinematics"
 
@@ -21,21 +22,26 @@ name = "Kinematics"
 [[lean_lib]]
 name = "Dynamics"
 
-# The closed-form inverse solver of `kinematics.py`'s `inverse_kinematics` and the theorems
-# that it returns exactly the poses it claims to. A pure proof library, so it is in
-# `defaultTargets` with the others.
+# The closed-form inverse solver of `kinematics.py`'s `inverse_kinematics`: soundness (it
+# returns exactly the poses it claims to) and completeness (a commanded configuration outside
+# the degenerate cases comes back with every angle equal modulo a full turn). A pure proof
+# library, so it is in `defaultTargets` with the others.
 [[lean_lib]]
 name = "InverseKinematics"
 
-# The ZYZ/wrist facts the reconstruction in `InverseKinematics` consumes: the half-turn
+# The ZYZ/wrist facts the closed form consumes, read in both directions: the half-turn
 # conjugation, the mirror identity that collapses the two wrist branches into one, the four
-# remaining ZYZ entries and the missing direction of orthogonality.
+# remaining ZYZ entries and the missing direction of orthogonality, and - the way a completeness
+# proof needs them - the read-backs saying the `atan2` entries determine the ZYZ angles, and the
+# singularity split that makes holding `theta4` at zero lose no reachability.
 [[lean_lib]]
 name = "Zyz"
 
-# `hypot`, `atan2` and `_wrap_angle` for the reals. Mathlib has no `atan2` at all, and the
-# solver is written in terms of it, so this is gap fill with no robot content of its own:
-# `atan2` is `Complex.arg`, whose convention is exactly `math.atan2`'s.
+# `hypot`, `atan2` and `_wrap_angle` for the reals, with the angle algebra of the planar solve:
+# the length of a scaled cosine/sine pair, the two scalings an angle read off a pair costs, and
+# the elbow's `arccos` round trip. Mathlib has no `atan2` at all, and the solver is written in
+# terms of it, so this is gap fill with no robot content of its own: `atan2` is `Complex.arg`,
+# whose convention is exactly `math.atan2`'s.
 [[lean_lib]]
 name = "Atan2"
 

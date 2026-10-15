@@ -78,6 +78,21 @@ $$
 The tool-tip position is the translation column of $^0T_{tool}$, equivalently
 ${}^0T_{tool}[0,0,0,1]^T$.
 
+The chain is formalised in `lean/Kinematics.lean`, where `carrierPose` collects
+the whole tower ${}^0T_0,\ldots,{}^0T_6$ into one vector: `carrierPose_zero`
+fixes ${}^0T_0$ as the base frame, `carrierPose_succ` is the recurrence
+${}^0T_{i+1} = {}^0T_i\,A_{i+1}$ the products above are built by,
+`carrierPose_six` records that ${}^0T_6$ is the forward kinematics, and
+`carrierPose_four_p` that the frame-4 origin of that tower is the wrist center
+the inverse solver backs out of a target pose. What that buys is an
+identification rather than new arithmetic: the frames the simulator draws are
+the frames the specification talks about, so a later statement about the wrist
+center is a statement about the arm on screen. The 4x4 matrix written above and
+the $(R,\mathbf{p})$ pair the formalisation carries are the same data in both
+directions — `Pose.toMatrix4_mul` says the matrix of a composition is the
+product of the matrices, `Pose.toMatrix4_eq_iff` that the pose is recovered
+from the matrix.
+
 ## Joint Variables
 
 For a revolute joint, the measured joint angle changes $\theta_i$ while $d_i$ is
@@ -303,6 +318,93 @@ Here matrix indices are 1-based. Every candidate branch is verified with
 forward kinematics before it is returned, so a target that no branch
 reproduces, such as an unreachable position or an orientation inconsistent
 with the position, yields no solution rather than an approximate one.
+
+### What the specification proves
+
+The closed form above is a formal specification in
+`lean/InverseKinematics.lean`, not a description of code, and it is proved
+sound **and** complete. Soundness is the older half: every candidate the
+solver returns reproduces the target pose exactly, for any target whose
+rotation is a rotation, with no tolerance anywhere (`fk_of_mem_solutions`) —
+over the reals there is nothing left for a final pose check to reject, which
+is why the specification has no counterpart of one. Completeness says the
+solver finds the configuration it was given: for a commanded $\theta$ that is
+not degenerate, some returned candidate sits on that configuration's own
+branches (`shoulderBranch`, `elbowBranch`) and has every angle equal to the
+commanded one *modulo a full turn* (`exists_solution_angles_eq`, with
+`Real.Angle` equality collecting an angle and its wrapped copy as one). A
+full turn is exactly the equivalence a pose can enforce: the chain reads each
+joint angle only through its cosine and sine, which is `fk_congr` on the whole
+chain (`dh_congr` joint by joint) and its single-factor forms `rotZ_congr` and
+`armRotation_congr`.
+
+The three excluded cases are the frontier itself, and `NonDegenerate` is their
+definition, one clause each. A wrist center on the base axis
+($a_1+q_\sigma=0$, the $r=0$ case of §3) leaves the plane's azimuth free, and
+$\theta_1$ with it. The arm folded back with equal links — §6's free case,
+$L_2=L_4$ with the wrist center on the frame-1 origin ($q_\sigma=h=0$) —
+leaves $\theta_2$ free: the fold's two directions are the same, and no value of
+$\theta_2$ moves the wrist center off $P_1$. Those two clauses are one
+condition, because a wrist center at the frame-1 origin lies inside the
+reachability band of §4 only when $L_2=L_4$, by the law of cosines. And
+$\sin\theta_5=0$, the wrist singularity of §8, leaves only the combination
+$\theta_4\pm\theta_6$ observable, not the split between the two joints. Inside
+the three the pose does not determine every joint, so no solver could recover
+them; outside them the commanded angles come back modulo a full turn. The
+exclusion is exact, not a conservative approximation.
+
+Degeneracy costs the closed form nothing else. `solutions_ne_nil` says the
+candidate list at `fk g θ` is non-empty for *every* commanded $\theta$, the
+degenerate ones included: the solver never reports failure for a pose the arm
+can reach. `length_solutions_le_eight` bounds the list by the $2\times2\times2$
+branches of §2. In the other direction the converse of soundness holds as well,
+for a target whose rotation is a rotation: a target that no joint vector
+reproduces — an unreachable position, an orientation inconsistent with the
+position — yields the empty list and nothing else, with no approximate answer
+behind it, and a non-empty list means some joint vector does reproduce the
+target (`solutions_eq_nil_of_not_reachable` and
+`exists_fk_eq_of_solutions_ne_nil`). So on the targets a pose can name —
+rotations, orthogonal of determinant one, which the chain's own rotation always
+is (`fk_R_orth`, `fk_R_det`) — candidates come back for precisely the poses the
+arm can strike. Section 8's observability claim is a theorem
+too: `wristRotation_singular_flat` says that at $\sin\theta_5=0$ the rotation
+depends on $\theta_4$ and $\theta_6$ only through their combination — only the
+sum $\theta_4+\theta_6$ matters when $\theta_5=0$ (`wristRotation_zero_middle`)
+and only the difference when $\theta_5=\pi$ (`wristRotation_pi_middle`, which
+exhibits it as $\theta_6-\theta_4$, the condition §8 writes as
+$\theta_4-\theta_6$) — so
+pinning $\theta_4$ loses no reachability, and
+`wristRotation_reconstruct_flat` is the solver's side of it: hold
+$\theta_4=0$ and read $\theta_6$ off the flattened product with joint 5 taken
+out. The read-back theorems `wristRotation_read_theta4_coe_angle`,
+`wristRotation_read_theta6_coe_angle` and `wristRotation_read_theta5_coe_angle`
+in `lean/Zyz.lean` are the converse of the reconstruction, saying the
+$\operatorname{atan2}$ reads of §7 determine the ZYZ angles they read, modulo a
+full turn. The angle arithmetic those steps rest on — `hypot_mul_cos_sin`,
+`atan2_pos_mul_coe_angle`, `atan2_neg_mul_coe_angle` and the elbow's
+`arccos_cos_coe_angle_of_nonneg` / `_of_nonpos` — is proved in
+`lean/Atan2.lean`, Mathlib having no `atan2` of its own.
+
+What the specification deliberately does not cover is as much a part of it as
+what it does. The numeric solvers `inverse_kinematics_position` and
+`inverse_kinematics_position_preserving_roll_yaw` are outside it: damped least
+squares over a geometric Jacobian in the first, finite-difference Jacobians and
+the ZYX roll/pitch/yaw extraction behind the second, convergence tolerances in
+both, are numerical methods for the same closed form rather than the closed
+form itself, and it is the closed form this specification is about.
+Floating-point tolerances, clamps and thresholds are out of scope for the
+reason they appear nowhere above: the `1e-7`/`1e-6` bands that widen the
+reachability test and the pose check, the `1e-6` threshold at the wrist
+singularity, and the clamp into `[-1, 1]` before the elbow's arc cosine exist
+to absorb rounding error, and over the reals the comparisons become the exact
+predicates the equations already write — membership in `[-1, 1]`, a zero
+`wristSine` — so the clamp has nothing left to do and the singularity is
+decided exactly rather than against a band. `_validate_supported_geometry`
+with its error strings is outside for the same reason — it guards an interface
+rather than the mathematics — and so are joint limits: the module carries none
+of its own, and the limits the sections above mention are the caller's to
+supply.
+
 # Force/torque sensor dynamics
 
 The static frame algebra of a wrench is proved in `lean/TorqueWrench.lean`; the model below adds
@@ -370,9 +472,9 @@ coordinates to sensor coordinates, and assuming both frames are bolted to the sa
 
 With those rules the model is frame-independent: computing $W_{\text{inertial}}$ in the tip frame
 and carrying it up gives the same wrench as computing it directly in the sensor frame, and the
-same holds for gravity (with $g \mapsto Rg$). That is `Dynamics.inertialWrench_transport` and
-`Dynamics.gravityWrench_transport`, and it is what lets mass properties be identified in one
-frame and used in another.
+same holds for gravity (with $g \mapsto Rg$). That is `inertialWrench_transport` and
+`gravityWrench_transport` in `lean/Dynamics.lean`, and it is what lets mass properties be
+identified in one frame and used in another.
 
 ## Compensation
 
@@ -383,7 +485,7 @@ W_{\text{contact}} = \operatorname{Ad}^{*}\!(p,R)^{-1}\Bigl(W_{\text{measured}} 
 $$
 
 Substituting the measurement model into the right-hand side returns the contact wrench exactly —
-`Dynamics.recoveredContactWrench_measuredWrench`, with no approximation anywhere. What is left in
+`recoveredContactWrench_measuredWrench`, with no approximation anywhere. What is left in
 a real system is the accuracy of $m$, $c$, $I_c$ and of the acceleration estimate, not the algebra.
 
 ## Two forms of the same equations, and composition
@@ -399,7 +501,7 @@ and the force becomes $F = m a + \alpha \times h + \omega \times (\omega \times 
 motion, but the body now enters only through the triple $(m, h, I_O)$. That triple is what makes
 bodies add — for two rigidly attached bodies with the same reference origin, masses, first
 moments $h$ and origin inertias all sum, and so do their inertial and gravity wrenches. This is
-`Dynamics.inertialWrench_add` / `Dynamics.gravityWrench_add`, i.e. how a tool and its payload
+`inertialWrench_add` / `gravityWrench_add`, i.e. how a tool and its payload
 combine into one body. Note that the centre of mass itself,
 $c = h/m$, is the one quantity that does *not* add without division, which is why the formalisation
 is written in terms of $h$.
@@ -416,5 +518,5 @@ in which both the gyroscopic term and the lever arm cancel: the first because
 $\omega \cdot (\omega \times I_c\omega) = 0$, the second by the cyclic invariance of the scalar
 triple product. Gravity's power is $m\,g \cdot (v + \omega \times c)$, the rate at which
 gravitational potential energy is lost. These are proved algebraically
-(`Dynamics.virtualWork_inertialWrench`, `Dynamics.virtualWork_gravityWrench`), so they hold over
+(`virtualWork_inertialWrench`, `virtualWork_gravityWrench`), so they hold over
 the rationals and are checkable by evaluation — no derivatives are needed anywhere in this file.

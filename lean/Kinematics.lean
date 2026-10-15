@@ -95,6 +95,29 @@ theorem toMatrix4_mul (X Y : Pose) :
 @[ext] theorem ext {X Y : Pose} (hR : X.R = Y.R) (hp : X.p = Y.p) : X = Y := by
   cases X; cases Y; simp_all
 
+/-- A pose is determined by its homogeneous matrix: the top-left 3x3 block of `X.toMatrix4` is
+`X.R` and its last column is `X.p`, so together with `toMatrix4_mul` this says that the `(R, p)`
+view and `mathematics.md`'s 4x4 view carry the same data in both directions. -/
+theorem toMatrix4_eq_iff {X Y : Pose} : X.toMatrix4 = Y.toMatrix4 ↔ X = Y := by
+  refine ⟨fun h => ?_, fun h => by rw [h]⟩
+  have entry : ∀ i j : Fin 4, X.toMatrix4 i j = Y.toMatrix4 i j :=
+    fun i j => congrArg (fun M : Matrix (Fin 4) (Fin 4) ℝ => M i j) h
+  -- The matrix literal computes at literal indices, so the block and the column are read back
+  -- out entry by entry rather than through a lemma about arbitrary indices.
+  have block : ∀ (M : Pose) (i j : Fin 3), M.toMatrix4 i.castSucc j.castSucc = M.R i j := by
+    intro M i j
+    fin_cases i <;> fin_cases j <;> rfl
+  have col : ∀ (M : Pose) (i : Fin 3), M.toMatrix4 i.castSucc 3 = M.p i := by
+    intro M i
+    fin_cases i <;> rfl
+  refine Pose.ext ?_ ?_
+  · ext i j
+    rw [← block X i j, ← block Y i j]
+    exact entry i.castSucc j.castSucc
+  · funext i
+    rw [← col X i, ← col Y i]
+    exact entry i.castSucc 3
+
 theorem mul_assoc (X Y Z : Pose) : X * Y * Z = X * (Y * Z) := by
   ext <;>
     simp only [mul_R, mul_p, Pi.add_apply, Matrix.mul_assoc, mulVec_mulVec,
@@ -535,6 +558,60 @@ theorem planarQ_sq_add_planarH_sq :
   rw [planarQ_eq, planarH_eq]
   nlinarith [Real.sin_sq_add_cos_sq (θ 1)]
 
+/-! ## The cumulative frames
+
+`mathematics.md` writes `⁰T_i = A_1 ⋯ A_i` for frame `i` expressed in the base frame, and
+`kinematics.py`'s `forward_kinematics` returns exactly that tower - the simulator draws the origin
+`⁰p_i` of each entry and reads the end-effector pose off the last one. `carrierPose` is that tower
+as a single vector, including the base frame `⁰T_0 = 1`.
+-/
+
+/-- The cumulative frames `⁰T_i` of the DH chain, `i = 0, …, 6`: `⁰T_0` is the base frame and
+`⁰T_i = A_1 * ⋯ * A_i` is frame `i` in base coordinates, so `(carrierPose g θ i).p` is the `⁰p_i`
+`mathematics.md` records for `i = 1, …, 6`. Written out rather than defined by recursion, so that
+`carrierPose_succ` is a computation on the literal vector instead of an induction carrying `Fin`
+arithmetic. -/
+def carrierPose (g : Geometry) (θ : Fin 6 → ℝ) : Fin 7 → Pose :=
+  ![1,
+    joint g θ 0,
+    joint g θ 0 * joint g θ 1,
+    armPose g θ,
+    armPose g θ * joint g θ 3,
+    armPose g θ * joint g θ 3 * joint g θ 4,
+    armPose g θ * joint g θ 3 * joint g θ 4 * joint g θ 5]
+
+/-- The base of the tower: `⁰T_0` is the frame coinciding with the base frame. -/
+theorem carrierPose_zero (g : Geometry) (θ : Fin 6 → ℝ) : carrierPose g θ 0 = 1 := rfl
+
+/-- One more joint transform extends the chain by one frame: `⁰T_{i+1} = ⁰T_i * A_{i+1}`. This is
+the recurrence `mathematics.md` defines the products by, recorded for the literal vector so that
+every frame in it is reachable from the base frame one joint at a time.
+
+The `i = 0` case is `1 * A_1 = A_1`, which is why `Pose.one_mul` is in the rewrite set. -/
+theorem carrierPose_succ (g : Geometry) (θ : Fin 6 → ℝ) (i : Fin 6) :
+    carrierPose g θ i.succ = carrierPose g θ i.castSucc * joint g θ i := by
+  fin_cases i <;>
+    -- Full `simp`, not `simp only`: the vector entries sit behind literal `Fin.mk` indices, which
+    -- the `cons_val` simproc and the `cons_val_*` lemmas reduce but a fixed rewrite set does not.
+    simp [carrierPose, armPose, Pose.one_mul]
+
+/-- The sixth cumulative frame is the forward kinematics: `⁰T_6 = A_1 * ⋯ * A_6`, the pose
+`forward_kinematics` reports in its last entry and `fk` abbreviates. -/
+theorem carrierPose_six (g : Geometry) (θ : Fin 6 → ℝ) : carrierPose g θ 6 = fk g θ := by
+  -- Full `simp` for the literal vector index, and `Pose.mul_assoc` alone for the rest: both sides
+  -- reassociate to the same right-nested product, `fk`'s `wristPose` pair included.
+  simp [carrierPose, fk, wristPose, armPose, Pose.mul_assoc]
+
+/-- The frame-4 origin of the chain is the wrist centre of the solver: `⁰T_4` extends `⁰T_3` by
+the joint-4 transform, whose only translation is `d4` along frame 3's z axis, and that is exactly
+the offset `wristCenter g (fk g θ)` removes from the end-effector origin. This is the identity
+`InverseKinematics.lean` feeds the solver, read off the frame tower the simulator draws. -/
+theorem carrierPose_four_p (g : Geometry) (θ : Fin 6 → ℝ) :
+    (carrierPose g θ 4).p = wristCenter g (fk g θ) := by
+  -- One `Pose.mul_p` and the frame-3 translation turn the left-hand side into exactly the
+  -- right-hand side of `wristCenter_fk_frameFour`; full `simp` again for the literal vector index.
+  simp [carrierPose, Pose.mul_p, joint_three_p, dhP_a_zero, wristCenter_fk_frameFour]
+
 /-! ## The wrist's ZYZ entries
 
 For `M = Rz a · Ry β · Rz c` the entries below are the ones the solver reads. With `β = -θ5`
@@ -604,5 +681,28 @@ theorem fk_congr {θ' : Fin 6 → ℝ}
       simp only [joint, Matrix.vecCons] <;>
       exact dh_congr (hcos _) (hsin _)
   simp only [fk, armPose, wristPose, hjoint]
+
+/-- `rotZ` reads its angle only modulo a full turn: its entries are the angle's cosine and sine,
+which `cos_of_angle_eq` and `sin_of_angle_eq` already know are functions of the angle in
+`Real.Angle`. This is `dh_congr`'s statement at the level of the single rotation factor. -/
+theorem rotZ_congr {a b : ℝ} (h : (a : Real.Angle) = (b : Real.Angle)) : rotZ a = rotZ b := by
+  ext i j
+  fin_cases i <;> fin_cases j <;>
+    simp [rotZ, cos_of_angle_eq h, sin_of_angle_eq h]
+
+/-- `armRotation` reads its three angles only modulo a full turn: each `rotZ` factor sees its
+angle through `rotZ_congr`, and joints 2 and 3 enter only through their sum, which agrees modulo a
+full turn by `Real.Angle.coe_add`. Together with `fk_congr` this is what lets a downstream
+completeness proof read the solver's `R_3^6` off the commanded angles: the solver's angles are the
+true ones up to a full turn, and the rotation they produce is the target rotation. -/
+theorem armRotation_congr {θ1 θ2 θ3 θ1' θ2' θ3' : ℝ}
+    (h1 : (θ1' : Real.Angle) = (θ1 : Real.Angle))
+    (h2 : (θ2' : Real.Angle) = (θ2 : Real.Angle))
+    (h3 : (θ3' : Real.Angle) = (θ3 : Real.Angle)) :
+    armRotation θ1' θ2' θ3' = armRotation θ1 θ2 θ3 := by
+  -- The sum only has to be congruent as a whole; `coe_add` splits it into the two hypotheses.
+  have h23 : ((θ2' + θ3' : ℝ) : Real.Angle) = ((θ2 + θ3 : ℝ) : Real.Angle) := by
+    rw [Real.Angle.coe_add, Real.Angle.coe_add, h2, h3]
+  simp only [armRotation, rotZ_congr h1, rotZ_congr h23]
 
 end Kinematics

@@ -92,6 +92,25 @@ displayed runtime angles stay synchronized with the Joint Angle fields in the
 Parameters tab; applying angle edits there also refreshes the front-screen
 readouts.
 
+## Kinematics specification
+
+`lean/` also carries a formal specification of the kinematics, in the same
+style as the force/torque one below. `lean/Kinematics.lean` covers the
+Denavit–Hartenberg transform, the cumulative frames the simulator draws, and the
+planar reduction; `lean/InverseKinematics.lean` covers the closed-form solver
+and proves it sound — every candidate it returns reproduces the target pose
+exactly (`fk_of_mem_solutions`) — and complete: for a commanded configuration
+outside three degenerate cases the solver returns that configuration, every
+angle equal modulo a full turn (`exists_solution_angles_eq`). The three
+exceptions are named exactly rather than approximated: a wrist center on the
+base axis, the arm folded back with equal links, and the wrist singularity
+`sin θ5 = 0`, where joints 4 and 6 share an axis and only `θ4 ± θ6` is
+observable. The numeric position solvers, floating-point tolerances and joint
+limits are deliberately out of scope — the specification covers the closed
+form, and over the reals the thresholds the code uses become exact predicates.
+`lake build` in `lean/` builds it, and the derivation it follows is in
+`mathematics.md`.
+
 ## Force torque control
 
 1) for Force torque control to be possible, 6DOF force sensor readings must be recalculated from one frame of reference to another. For example from sensor frame to tooltip frame where the contact point actually is.

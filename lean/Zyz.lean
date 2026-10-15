@@ -24,8 +24,9 @@ noncomputable section
 # The ZYZ/wrist facts the closed-form inverse kinematics consumes
 
 This file carries the wrist's `ZYZ` algebra that `InverseKinematics.lean`'s reconstruction step
-needs and that `Kinematics.lean` does not already provide: the four facts below, and the
-reconstruction theorems built out of them.
+needs and that `Kinematics.lean` does not already provide: the four facts below, the
+reconstruction theorems built out of them, and the read-off theorems that are the same argument
+read the other way.
 
 * `rotZ_pi_mul_rotY_mul_rotZ_pi` - a half-turn about z conjugated with a y-rotation;
 * `wristRotation_mirror` - the two wrist branches are literally the same rotation, which is what
@@ -33,7 +34,13 @@ reconstruction theorems built out of them.
 * `rotZ_mul_rotY_mul_rotZ_entries_all` - the four entries of a ZYZ product left out by
   `Kinematics.rotZ_mul_rotY_mul_rotZ_entries`;
 * `mul_transpose_eq_one_of_transpose_mul` - the direction of orthogonality that
-  `Kinematics.mul_orth` cannot produce.
+  `Kinematics.mul_orth` cannot produce;
+* `wristRotation_hypot_third_column` and the three `wristRotation_read_*` theorems - the three
+  angles the solver reads off a *commanded* wrist are the commanded ones, which is the direction a
+  completeness statement needs and the reconstruction cannot supply: it starts from a rotation,
+  not from an angle triple;
+* `wristRotation_singular_flat`, `wristRotation_zero_middle` and `wristRotation_pi_middle` - the
+  wrist singularity, where only `θ4 + θ6` (or `θ4 - θ6`) is observable at all.
 
 `wristRotation_reconstruct` then puts them together: the three angles the solver's wrist step
 reads off a rotation rebuild it, in either `atan2` branch
@@ -41,7 +48,14 @@ reads off a rotation rebuild it, in either `atan2` branch
 (`wristRotation_reconstruct_flat`). The middle angle is passed to `wristRotation` *negated*,
 because that definition already carries the negation of `θ5`: the ZYZ middle angle `γ` of `Q` is
 recovered as `θ5 = -γ`, `hypot` is never negative, and the two branches the solver returns are
-exactly `(a, -β, c)` and `(a + π, β, c + π)`. -/
+exactly `(a, -β, c)` and `(a + π, β, c + π)`.
+
+The read-off theorems below run the same three angles through the product instead of the product
+through the angles: `wristRotation_read_theta4_coe_angle` and its two siblings say that the solver
+reads `a`, `β` and `c` back out of `wristRotation a β c`, the two outer ones up to the one
+half-turn offset - exactly the offset `wristRotation_reconstruct_mirror` mirrors - and the last
+three theorems record what the product still says once `sin β = 0` and the three angles have
+stopped being separately observable. -/
 
 namespace Kinematics
 
@@ -490,5 +504,241 @@ theorem wristRotation_reconstruct_flat {Q : Matrix (Fin 3) (Fin 3) ℝ}
   ext i j
   fin_cases i <;> fin_cases j <;>
     simp [hc_sin, hc_cos, hB, hD, hrr, ← hr, hu, hv, h02, h12]
+
+/-! ## The reads invert the product
+
+The reconstruction turns a rotation into angles; a completeness proof needs the other direction,
+that the angles the solver *reads* off a commanded wrist are the commanded ones. The theorems
+below are that direction: `wristRotation_hypot_third_column` and the three `wristRotation_read_*`
+are the solver's own `atan2` calls applied to a `wristRotation`, each returning the angle that went
+in, and the last three say what is left of the product once `sin β = 0` and the three angles have
+stopped being separately observable at all.
+
+`wristRotation a β c` is `rotZ a * rotY (-β) * rotZ c`, so reading
+`Kinematics.rotZ_mul_rotY_mul_rotZ_entries` at `(a, -β, c)` supplies the five numbers the solver's
+reads are built from: `Q 0 2 = -sin β · cos a`, `Q 1 2 = -sin β · sin a`, `Q 2 2 = cos β`,
+`Q 2 0 = sin β · cos c` and `Q 2 1 = -sin β · sin c`. No other entry of the product enters a read,
+so every theorem below is a statement about those five numbers.
+
+The two outer reads carry the *same* offset, `if 0 < Real.sin β then Real.pi else 0`, because the
+two pairs they read are `(-sin β · cos x, -sin β · sin x)` with the same factor `-sin β` in front
+of the same unit-circle pair `(cos x, sin x)`; only the sign of that factor can move the angle, and
+it moves both by the same half turn - which is what lets the solver's single `mirror` flag serve
+joints 4 and 6 at once. The hypothesis `Real.sin β ≠ 0` on those three reads is the non-vanishing
+the scale needs for the pair to have a direction at all, the same condition under which
+`wristRotation_reconstruct` applies; the singular case it excludes is what the last three theorems
+describe, where the product no longer determines the three angles separately and only `θ4 ± θ6`
+survives.
+-/
+
+/-- The length of the third column's `xy` part of a ZYZ product is `|Real.sin β|`: the two entries
+`-sin β · cos a` and `-sin β · sin a` are a common factor `-sin β` times the point of the unit
+circle at angle `a`, and a length cannot remember the sign of that factor - only its absolute
+value. This is the number the solver's middle read, `atan2 (hypot Q₀₂ Q₁₂) Q₂₂`, is taken of, and
+it is why `RealAtan2.hypot_mul_cos_sin` is stated with an absolute value: with it the third
+column's length collapses to `|sin β|` in one step, with no case split on the sign of the middle
+angle's sine. -/
+theorem wristRotation_hypot_third_column (a β c : ℝ) :
+    hypot ((wristRotation a β c) 0 2) ((wristRotation a β c) 1 2) = |Real.sin β| := by
+  obtain ⟨h02, h12, -, -, -⟩ := rotZ_mul_rotY_mul_rotZ_entries a (-β) c
+  -- Unfold to the product the entry lemma is stated for, read the two entries off it, and let
+  -- `hypot_mul_cos_sin` take the common factor out - the `-β` the entry lemma is called at is
+  -- what turns the factor into the plain `-sin β` the last step needs `abs_neg` for.
+  simp only [wristRotation]
+  rw [h02, h12, Real.sin_neg, hypot_mul_cos_sin, abs_neg]
+
+/-- The solver's joint-4 read-off inverts `wristRotation`: the angle of the third column's `(x, y)`
+part is the commanded `a`, plus a half turn exactly when `sin β` is negative.
+
+The pair read is `(Q 1 2, Q 0 2) = -sin β · (sin a, cos a)`, the direction of joint 4 scaled by
+`-sin β`; a positive scale moves no angle, a negative one costs exactly a half turn, and the `if`
+in the statement is that half turn. That is also why the hypothesis is `Real.sin β ≠ 0` rather
+than a sign: the factor has to be *nonzero* for the pair to have a direction at all - at
+`sin β = 0` the third column is vertical and the solver takes its flat branch instead - and the two
+signs of `sin β` are the two `atan2` branches, which the statement keeps apart through the `if`
+rather than through a case split of its own. -/
+theorem wristRotation_read_theta4_coe_angle (a β c : ℝ) (h : Real.sin β ≠ 0) :
+    (atan2 ((wristRotation a β c) 1 2) ((wristRotation a β c) 0 2) : Real.Angle) =
+      (a : Real.Angle) + (if 0 < Real.sin β then Real.pi else 0) := by
+  obtain ⟨h02, h12, -, -, -⟩ := rotZ_mul_rotY_mul_rotZ_entries a (-β) c
+  simp only [wristRotation]
+  -- Both entries carry `sin (-β)`, and `-sin β` is the scale the two multiplication lemmas are
+  -- stated for.
+  rw [h12, h02, Real.sin_neg]
+  -- The pair the two lemmas are given is `(cos a, sin a)`, a point of the unit circle, so it
+  -- cannot be the origin and `atan2_neg_mul_coe_angle`'s non-vanishing hypothesis is free; it
+  -- has to be proved rather than assumed because `h` is a hypothesis about `sin β`, not about `a`.
+  have hne : (Real.cos a, Real.sin a) ≠ (0, 0) := by
+    intro h0
+    have hc : Real.cos a = 0 := congrArg Prod.fst h0
+    have hs : Real.sin a = 0 := congrArg Prod.snd h0
+    have h1 : (0 : ℝ) = 1 := by simpa [hc, hs] using Real.sin_sq_add_cos_sq a
+    exact one_ne_zero h1.symm
+  -- `h` leaves exactly two cases, and they are the two branches: the sign of `-sin β` is the
+  -- opposite of the sign of `sin β`, so a negative `sin β` is the *positive* scale.
+  rcases lt_or_gt_of_ne h with hneg | hpos
+  · -- `sin β < 0`: the scale is positive and the read is the angle itself, with no offset.
+    rw [atan2_pos_mul_coe_angle (neg_pos.mpr hneg), atan2_cos_sin_coe_angle a,
+      ite_eq_right (not_lt.mpr hneg.le), Real.Angle.coe_zero, add_zero]
+  · -- `sin β > 0`: the scale is negative, which is exactly the half turn the offset names.
+    rw [atan2_neg_mul_coe_angle (neg_lt_zero.mpr hpos) hne, atan2_cos_sin_coe_angle a,
+      ite_eq_left hpos]
+
+/-- The solver's joint-6 read-off inverts `wristRotation`: the angle of the third row's `(y, -x)`
+part is the commanded `c`, plus the *same* half turn the joint-4 read carries.
+
+`atan2 (Q 2 1) (-(Q 2 0))` is taken of `(-sin β · sin c, -sin β · cos c)`, the same `-sin β` scale
+of `(sin c, cos c)` that joint 4's read sees of `(sin a, cos a)` - only the unit-circle direction
+differs, so the sign of the scale, and hence the offset, is the same term as in
+`wristRotation_read_theta4_coe_angle`. That is the reason the solver's one `mirror` flag serves
+both joints: the entry lemma states the `Q 2 0` entry with its minus sign in front of the product
+rather than on the factor, which is exactly why the solver's call negates that entry before
+reading it, and the two minus signs have to cancel for the factor to come out as `-sin β` again. -/
+theorem wristRotation_read_theta6_coe_angle (a β c : ℝ) (h : Real.sin β ≠ 0) :
+    (atan2 ((wristRotation a β c) 2 1) (-((wristRotation a β c) 2 0)) : Real.Angle) =
+      (c : Real.Angle) + (if 0 < Real.sin β then Real.pi else 0) := by
+  obtain ⟨-, -, -, h20, h21⟩ := rotZ_mul_rotY_mul_rotZ_entries a (-β) c
+  simp only [wristRotation]
+  -- `Q 2 1` is the plain product; `-Q 2 0` needs its negation moved onto the factor, which is
+  -- what `neg_mul` does and why the statement reads the *negated* entry.
+  have h21' : (rotZ a * rotY (-β) * rotZ c) 2 1 = (-Real.sin β) * Real.sin c := by
+    rw [h21, Real.sin_neg]
+  have h20' : -((rotZ a * rotY (-β) * rotZ c) 2 0) = (-Real.sin β) * Real.cos c := by
+    rw [h20, Real.sin_neg]
+    ring
+  rw [h21', h20']
+  -- From here the read is the joint-4 read with `c` in place of `a`, offset included.
+  have hne : (Real.cos c, Real.sin c) ≠ (0, 0) := by
+    intro h0
+    have hc : Real.cos c = 0 := congrArg Prod.fst h0
+    have hs : Real.sin c = 0 := congrArg Prod.snd h0
+    have h1 : (0 : ℝ) = 1 := by simpa [hc, hs] using Real.sin_sq_add_cos_sq c
+    exact one_ne_zero h1.symm
+  rcases lt_or_gt_of_ne h with hneg | hpos
+  · rw [atan2_pos_mul_coe_angle (neg_pos.mpr hneg), atan2_cos_sin_coe_angle c,
+      ite_eq_right (not_lt.mpr hneg.le), Real.Angle.coe_zero, add_zero]
+  · rw [atan2_neg_mul_coe_angle (neg_lt_zero.mpr hpos) hne, atan2_cos_sin_coe_angle c,
+      ite_eq_left hpos]
+
+/-- The solver's middle read-off, on the branch sign the solver uses: the signed
+`atan2 (hypot Q₀₂ Q₁₂) Q₂₂` - the `hypot` being `|sin β|` - is the commanded `β` exactly, not
+merely up to a half turn.
+
+The solver takes its sign from `sin β` itself, `1` where the sine is positive and `-1` where it is
+negative, which is the integer `if` in the statement; and that is exactly the sign the read needs.
+`atan2 (|sin β|) (cos β)` is `β` when `sin β` is positive, and when `sin β` is negative it is `-β`
+- `|sin β|` is then `sin (-β)` and `cos β` is `cos (-β)`, so the pair read is the pair of the
+*negated* angle - which the `-1` brings back to `β`. The hypothesis `Real.sin β ≠ 0` is needed here
+for a different reason than in the two outer reads: at the singularity `hypot Q₀₂ Q₁₂` is `0`, so
+there is no `(cos, sin)` pair left to read an angle off at all, and the solver has to flatten the
+wrist instead of reading this. -/
+theorem wristRotation_read_theta5_coe_angle (a β c : ℝ) (h : Real.sin β ≠ 0) :
+    ((((if 0 < Real.sin β then (1 : ℤ) else -1) : ℤ) : ℝ) *
+        atan2 (hypot ((wristRotation a β c) 0 2) ((wristRotation a β c) 1 2))
+          ((wristRotation a β c) 2 2) : Real.Angle) = (β : Real.Angle) := by
+  obtain ⟨-, -, h22, -, -⟩ := rotZ_mul_rotY_mul_rotZ_entries a (-β) c
+  -- Both halves of the read are already named: the `hypot` is the third column's length and the
+  -- second entry is `cos (-β)`, so the middle angle is the only thing left to identify.
+  rw [wristRotation_hypot_third_column a β c]
+  simp only [wristRotation]
+  rw [h22, Real.cos_neg]
+  rcases lt_or_gt_of_ne h with hneg | hpos
+  · -- `sin β < 0`: `|sin β|` is `sin (-β)` and `cos β` is `cos (-β)`, so the read is the angle
+    -- `-β`; the statement's `-1` negates it back, and the two `coe_neg`s are where the inner
+    -- negation comes back out of the `Real.Angle` coercion.
+    rw [ite_eq_right (not_lt.mpr hneg.le), Int.cast_neg, Int.cast_one, neg_one_mul,
+      abs_of_neg hneg, ← Real.sin_neg, ← Real.cos_neg, Real.Angle.coe_neg, atan2_cos_sin_coe_angle,
+      Real.Angle.coe_neg, neg_neg]
+  · -- `sin β > 0`: `|sin β|` is `sin β`, so the read is `β` itself and the branch sign is `1`.
+    rw [ite_eq_left hpos, Int.cast_one, one_mul, abs_of_pos hpos, atan2_cos_sin_coe_angle]
+
+/-- At the wrist singularity the flat split loses nothing: with `sin β = 0` the middle factor of
+`wristRotation a β c` is a diagonal matrix, so the product depends on `a` and `c` only through the
+combination that diagonal lets through - `a + c` when `cos β = 1`, `c - a` when `cos β = -1` - and
+the solver's split, which holds `θ4` at zero and hands the whole combination to `θ6`, rebuilds the
+same product.
+
+`sin β = 0` puts `β` at a multiple of `π`, and `sin² + cos² = 1` then leaves just the two cases
+`cos β = ±1`, which are the two halves of the proof. With `cos β = 1` the middle factor is the
+identity, `rotY (-β) = 1`, and the two z rotations simply add - which is the `a` the statement's
+`if` picks. With `cos β = -1` it is `diag (-1, 1, -1)`, and such a diagonal turns a z rotation into
+the z rotation of the *opposite* angle: `rotZ a * D = D * rotZ (-a)`, so `rotZ a` passes from the
+left of the middle factor to the right negated and the product sees `c - a` - which is the `-a`
+the `if` picks. Both cases are why the `if` is on the sign of `cos β` and not, say, on whether the
+product is `rotZ (a + c)` or `rotZ (c - a)`: the two are the two halves of the singular set. -/
+theorem wristRotation_singular_flat (a β c : ℝ) (h : Real.sin β = 0) :
+    wristRotation a β c = wristRotation 0 β (c + (if 0 < Real.cos β then a else -a)) := by
+  -- `sin β = 0` leaves `cos β = ±1`; `sq_eq_one_iff` is that step, and the two cases below are
+  -- the two halves of the statement's `if`.
+  have hcos2 : Real.cos β ^ 2 = 1 := by
+    simpa [h] using Real.sin_sq_add_cos_sq β
+  rcases sq_eq_one_iff.mp hcos2 with hcos | hcos
+  · -- `cos β = 1`: the middle factor is the identity, and `rotZ_add` adds the two z rotations.
+    have hsin' : Real.sin (-β) = 0 := by rw [Real.sin_neg, h, neg_zero]
+    have hcos' : Real.cos (-β) = 1 := by rw [Real.cos_neg, hcos]
+    have hY : rotY (-β) = 1 := by
+      ext i j
+      fin_cases i <;> fin_cases j <;> simp [rotY, hsin', hcos']
+    -- The statement's `if` is true in this case, and `hY` collapses the middle factor, so both
+    -- sides are `rotZ a * rotZ c` up to the order of the sum.
+    rw [hcos, ite_eq_left zero_lt_one]
+    simp only [wristRotation, rotZ_zero, hY, Matrix.one_mul, Matrix.mul_one]
+    rw [rotZ_add a c, add_comm a c]
+  · -- `cos β = -1`: the middle factor is `diag (-1, 1, -1)`, which conjugates the two z rotations
+    -- - `rotZ a` moves to the right of it as `rotZ (-a)` - so the sum is taken the other way.
+    have hsin' : Real.sin (-β) = 0 := by rw [Real.sin_neg, h, neg_zero]
+    have hcos' : Real.cos (-β) = -1 := by rw [Real.cos_neg, hcos]
+    have hD : rotY (-β) = !![(-1 : ℝ), 0, 0; 0, 1, 0; 0, 0, -1] := by
+      ext i j
+      fin_cases i <;> fin_cases j <;> simp [rotY, hsin', hcos']
+    have hconj : rotZ a * rotY (-β) = rotY (-β) * rotZ (-a) := by
+      -- `hD` is what makes the two sides match entry by entry: with the literal diagonal in
+      -- place of `rotY (-β)` every entry is a product of `±1`, `sin a` and `cos a` once `simp`
+      -- has evaluated `cos (-a)` and `sin (-a)`, and its arithmetic normalisation closes them.
+      rw [hD]
+      ext i j
+      fin_cases i <;> fin_cases j <;>
+        simp [rotZ, Matrix.mul_apply, Fin.sum_univ_three]
+    rw [hcos, ite_eq_right (not_lt.mpr (neg_nonpos.mpr zero_le_one))]
+    -- `hconj` is the pass-through that names the combination the `if` picked, and `rotZ_add`
+    -- then collects the two z rotations into one.
+    simp only [wristRotation, rotZ_zero, Matrix.one_mul]
+    rw [hconj, Matrix.mul_assoc (rotY (-β)) (rotZ (-a)) (rotZ c), rotZ_add,
+      show -a + c = c + -a by ring]
+
+/-- With `θ5 = 0` the wrist is a single z rotation: only `θ4 + θ6` is observable.
+
+Written out, this is the `cos β = 1` half of `wristRotation_singular_flat` at `β = 0`, and it is
+the statement `mathematics.md`'s section 8 makes when it says that at `θ5 = 0` only `θ4 + θ6` is
+observable: the middle factor is the identity, so `wristRotation a 0 c` and `wristRotation 0 0
+(a + c)` are the same rotation and nothing in the product can tell the two outer angles apart -
+the solver may hold `θ4` at zero and hand the sum to `θ6`, which is exactly the flat branch's
+`atan2` read of `rotZ θ6`. -/
+theorem wristRotation_zero_middle (a c : ℝ) : wristRotation a 0 c = wristRotation 0 0 (a + c) := by
+  -- `rotY 0 = 1` and `rotZ 0 = 1`, leaving `rotZ a * rotZ c` against `rotZ (a + c)`.
+  simp only [wristRotation, neg_zero, rotY_zero, rotZ_zero, Matrix.one_mul, Matrix.mul_one]
+  rw [rotZ_add a c]
+
+/-- With `θ5 = π` the half-turn in the middle makes only `θ4 - θ6` observable.
+
+This is `wristRotation_singular_flat` at `β = π`, where `cos β = -1` picks the `-a` branch: the
+middle factor is the half-turn about y, and conjugating a z rotation with it turns the angle
+negative, so the product sees `θ4 - θ6` and not their sum - the other of the two sentences of
+`mathematics.md`'s section 8, and the reason the flat branch's `atan2` reads a *difference* when
+`θ5` comes out at `π` rather than at `0`. -/
+theorem wristRotation_pi_middle (a c : ℝ) : wristRotation a Real.pi c = wristRotation 0 Real.pi (c - a) := by
+  -- The half-turn about y is `diag (-1, 1, -1)`, and that diagonal is the conjugation above; it
+  -- is stated for `-π` because that is the angle `wristRotation` hands its middle factor.
+  have hconj : rotZ a * rotY (-Real.pi) = rotY (-Real.pi) * rotZ (-a) := by
+    -- No `ring` after the expansion: every entry here is a product of at most three of
+    -- `±1`, `sin a` and `cos a` once `simp` has evaluated `cos (-π)`, `sin (-π)`, `cos (-a)`
+    -- and `sin (-a)`, and `simp`'s arithmetic normalisation already sees that the two sides
+    -- match - there is no trigonometric addition to expand.
+    ext i j
+    fin_cases i <;> fin_cases j <;>
+      simp [rotZ, rotY, Matrix.mul_apply, Fin.sum_univ_three]
+  simp only [wristRotation, rotZ_zero, Matrix.one_mul]
+  rw [hconj, Matrix.mul_assoc (rotY (-Real.pi)) (rotZ (-a)) (rotZ c), rotZ_add,
+    show -a + c = c - a by ring]
 
 end Kinematics
