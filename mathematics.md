@@ -303,3 +303,118 @@ Here matrix indices are 1-based. Every candidate branch is verified with
 forward kinematics before it is returned, so a target that no branch
 reproduces, such as an unreachable position or an orientation inconsistent
 with the position, yields no solution rather than an approximate one.
+# Force/torque sensor dynamics
+
+The static frame algebra of a wrench is proved in `lean/TorqueWrench.lean`; the model below adds
+the two terms a real sensor actually measures — the inertia of the tool and payload, and gravity.
+It is formalised in `lean/Dynamics.lean`, and the exact numbers it predicts are generated into
+`test_data/force_torque_frames.json` (schema 3) and re-derived in `test_force_torque.py`.
+
+## The measurement model
+
+A sensor mounted between the wrist and the tool measures the wrench *transmitted through it*:
+the wrench the proximal side applies to everything distal to it. That equals the contact wrench
+carried up to the sensor frame, plus the inertial wrench of the distal body, minus the wrench
+gravity exerts on it:
+
+$$
+W_{\text{measured}} = \operatorname{Ad}^{*}\!(p,R)\, W_{\text{contact}} + W_{\text{inertial}} - W_{\text{gravity}} .
+$$
+
+All three terms are expressed in the sensor frame. $g$ is the gravitational **acceleration**
+(pointing down, $g \approx (0,0,-9.81)$ in the base frame); gravity exerts the force $m g$ on the
+body, so a sensor holding it still feels $+m g$ from the arm and reads $-W_{\text{gravity}}$.
+
+## Newton–Euler about the sensor origin
+
+With $m$ the distal mass, $c$ its centre of mass in sensor coordinates, $I_c$ its inertia tensor
+about the centre of mass, and $(v,\omega)$ and $(a,\alpha)$ the body's twist and acceleration,
+
+$$
+a_c = a + \alpha \times c + \omega \times (\omega \times c), \qquad
+F = m\,a_c, \qquad
+\tau = I_c\,\alpha + \omega \times (I_c\,\omega) + c \times F .
+$$
+
+$a_c$ is the acceleration of the material point at the centre of mass; the centripetal term
+$\omega \times (\omega \times c)$ is the difference between that point and the sensor origin and
+is the term most often dropped. The torque has three parts: the inertia couple $I_c \alpha$, the
+gyroscopic term $\omega \times (I_c \omega)$, and the moment of the force through the lever arm
+$c$.
+
+## Gravity
+
+$$
+W_{\text{gravity}} = \bigl(m\,g,\; c \times (m\,g)\bigr) .
+$$
+
+A body at rest ($a = \alpha = 0$, $v = \omega = 0$) has $W_{\text{inertial}} = 0$, so the sensor
+reads exactly $-W_{\text{gravity}}$. That single equation pins down the sign convention of the
+whole model and is the first case in the generated data (`rest_gravity_only`).
+
+## Frame changes
+
+Writing $p$ for the tip origin in sensor coordinates and $R$ for the rotation from tip
+coordinates to sensor coordinates, and assuming both frames are bolted to the same rigid body:
+
+- a wrench is a covector and transports by the dual map, $\tau \mapsto R\tau + p \times (RF)$;
+- a twist transports linearly, $v \mapsto R^T(v + \omega \times p)$, $\omega \mapsto R^T\omega$;
+- an **acceleration does not transport like a twist**: the material point at the tip is not the
+  one at the sensor origin, so
+  $$
+  a \mapsto R^T\bigl(a + \alpha \times p + \omega \times (\omega \times p)\bigr), \qquad
+  \alpha \mapsto R^T \alpha ,
+  $$
+  which is why the acceleration transport has to be told the twist;
+- the body's own description changes by $c \mapsto p + Rc$ and $I_c \mapsto R I_c R^T$.
+
+With those rules the model is frame-independent: computing $W_{\text{inertial}}$ in the tip frame
+and carrying it up gives the same wrench as computing it directly in the sensor frame, and the
+same holds for gravity (with $g \mapsto Rg$). That is `Dynamics.inertialWrench_transport` and
+`Dynamics.gravityWrench_transport`, and it is what lets mass properties be identified in one
+frame and used in another.
+
+## Compensation
+
+The controller wants $W_{\text{contact}}$, so it runs the model backwards:
+
+$$
+W_{\text{contact}} = \operatorname{Ad}^{*}\!(p,R)^{-1}\Bigl(W_{\text{measured}} - W_{\text{inertial}} + W_{\text{gravity}}\Bigr) .
+$$
+
+Substituting the measurement model into the right-hand side returns the contact wrench exactly —
+`Dynamics.recoveredContactWrench_measuredWrench`, with no approximation anywhere. What is left in
+a real system is the accuracy of $m$, $c$, $I_c$ and of the acceleration estimate, not the algebra.
+
+## Two forms of the same equations, and composition
+
+Moving the inertia to the frame origin by the parallel-axis theorem, $I_O = I_c + m(\langle c,c\rangle \mathbf 1 - cc^T)$,
+the torque becomes
+
+$$
+\tau = I_O\,\alpha + \omega \times (I_O\,\omega) + h \times a , \qquad h = m c ,
+$$
+
+and the force becomes $F = m a + \alpha \times h + \omega \times (\omega \times h)$: the same
+motion, but the body now enters only through the triple $(m, h, I_O)$. That triple is what makes
+bodies add — for two rigidly attached bodies with the same reference origin, masses, first
+moments $h$ and origin inertias all sum, and so do their inertial and gravity wrenches. This is
+`Dynamics.inertialWrench_add` / `Dynamics.gravityWrench_add`, i.e. how a tool and its payload
+combine into one body. Note that the centre of mass itself,
+$c = h/m$, is the one quantity that does *not* add without division, which is why the formalisation
+is written in terms of $h$.
+
+## Power
+
+The inertial wrench's power on the body's own twist is
+
+$$
+F \cdot v + \tau \cdot \omega = m\, a_c \cdot (v + \omega \times c) + \alpha \cdot (I_c\,\omega),
+$$
+
+in which both the gyroscopic term and the lever arm cancel: the first because
+$\omega \cdot (\omega \times I_c\omega) = 0$, the second by the cyclic invariance of the scalar
+triple product. Gravity's power is $m\,g \cdot (v + \omega \times c)$, the rate at which
+gravitational potential energy is lost. These are proved algebraically
+(`Dynamics.virtualWork_inertialWrench`, `Dynamics.virtualWork_gravityWrench`), so they hold over
+the rationals and are checkable by evaluation — no derivatives are needed anywhere in this file.

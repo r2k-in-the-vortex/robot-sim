@@ -1,7 +1,494 @@
-{"source": "lean/TorqueWrench.lean, evaluated over the rationals (exact)",
- "schema_version": 2,
+{"source":
+ "lean/TorqueWrench.lean and lean/Dynamics.lean, evaluated over the rationals (exact)",
+ "schema_version": 3,
+ "dynamics_cases":
+ [{"tip_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+   "sensor_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+   "sensor_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+   "parts": null,
+   "p": ["0", "0", "3/2"],
+   "name": "rest_gravity_only",
+   "mass_properties":
+   {"mass": "2",
+    "inertia": [["1", "0", "0"], ["0", "3/2", "0"], ["0", "0", "5/2"]],
+    "com": ["1/4", "0", "-1/2"]},
+   "gravity": ["0", "0", "-981/100"],
+   "expected":
+   {"tip_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+    "tip_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+    "recovered_contact_wrench":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "power_inertial_work": "0",
+    "power_inertial_formula": "0",
+    "power_gravity_work": "0",
+    "power_gravity_formula": "0",
+    "origin_inertia":
+    [["3/2", "0", "1/4"], ["0", "17/8", "0"], ["1/4", "0", "21/8"]],
+    "measured_wrench":
+    {"torque": ["0", "-981/200", "0"], "force": ["0", "0", "981/50"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "2",
+     "inertia": [["1", "0", "0"], ["0", "3/2", "0"], ["0", "0", "5/2"]],
+     "com": ["1/4", "0", "1"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "inertial_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["0", "981/200", "0"], "force": ["0", "0", "-981/50"]},
+    "gravity_wrench":
+    {"torque": ["0", "981/200", "0"], "force": ["0", "0", "-981/50"]},
+    "first_moment": ["1/2", "0", "-1"],
+    "com_accel": ["0", "0", "0"]},
+   "R": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]]},
+  {"tip_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+   "sensor_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+   "sensor_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+   "parts": null,
+   "p": ["-1/2", "1", "2"],
+   "name": "rest_gravity_rotated",
+   "mass_properties":
+   {"mass": "3/2",
+    "inertia":
+    [["7/4", "1/2", "-1/3"], ["1/2", "5/2", "2/3"], ["-1/3", "2/3", "11/4"]],
+    "com": ["1/3", "-2", "1/2"]},
+   "gravity": ["-1", "2", "-9"],
+   "expected":
+   {"tip_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+    "tip_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+    "recovered_contact_wrench":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "power_inertial_work": "0",
+    "power_inertial_formula": "0",
+    "power_gravity_work": "0",
+    "power_gravity_formula": "0",
+    "origin_inertia":
+    [["65/8", "3/2", "-7/12"],
+     ["3/2", "73/24", "13/6"],
+     ["-7/12", "13/6", "107/12"]],
+    "measured_wrench":
+    {"torque": ["59/20", "-227/20", "-57/20"], "force": ["3/2", "-3", "27/2"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "3/2",
+     "inertia":
+     [["2153/1690", "-511/2535", "-799/5070"],
+      ["-511/2535", "9759/3380", "347/845"],
+      ["-799/5070", "347/845", "1919/676"]],
+     "com": ["11/10", "-3/10", "7/3"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "inertial_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["-59/20", "227/20", "57/20"], "force": ["-3/2", "3", "-27/2"]},
+    "gravity_wrench":
+    {"torque": ["-59/20", "227/20", "57/20"], "force": ["-3/2", "3", "-27/2"]},
+    "first_moment": ["1/2", "-3", "3/4"],
+    "com_accel": ["0", "0", "0"]},
+   "R":
+   [["48/65", "-3/5", "4/13"],
+    ["36/65", "4/5", "3/13"],
+    ["-5/13", "0", "12/13"]]},
+  {"tip_wrench": {"torque": ["1/2", "1", "-1/3"], "force": ["3", "-2", "1"]},
+   "sensor_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+   "sensor_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+   "parts": null,
+   "p": ["1", "-1/2", "3"],
+   "name": "rest_gravity_with_contact",
+   "mass_properties":
+   {"mass": "2",
+    "inertia": [["2", "1/4", "0"], ["1/4", "5/2", "-1/2"], ["0", "-1/2", "3"]],
+    "com": ["-3/4", "1/2", "1"]},
+   "gravity": ["1/2", "0", "-49/5"],
+   "expected":
+   {"tip_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+    "tip_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+    "recovered_contact_wrench":
+    {"torque": ["1/2", "1", "-1/3"], "force": ["3", "-2", "1"]},
+    "power_inertial_work": "0",
+    "power_inertial_formula": "0",
+    "power_gravity_work": "0",
+    "power_gravity_formula": "0",
+    "origin_inertia":
+    [["9/2", "1", "3/2"], ["1", "45/8", "-3/2"], ["3/2", "-3/2", "37/8"]],
+    "measured_wrench":
+    {"torque": ["-267/85", "551/510", "-37/34"],
+     "force": ["2", "-38/17", "1661/85"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "2",
+     "inertia":
+     [["2", "15/68", "2/17"],
+      ["15/68", "1749/578", "-281/578"],
+      ["2/17", "-281/578", "715/289"]],
+     "com": ["1/4", "-9/17", "70/17"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "inertial_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["882/85", "1533/170", "9/17"], "force": ["1", "0", "-98/5"]},
+    "gravity_wrench":
+    {"torque": ["882/85", "1533/170", "9/17"], "force": ["1", "0", "-98/5"]},
+    "first_moment": ["-3/2", "1", "2"],
+    "com_accel": ["0", "0", "0"]},
+   "R": [["1", "0", "0"], ["0", "15/17", "-8/17"], ["0", "8/17", "15/17"]]},
+  {"tip_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+   "sensor_twist": {"v": ["0", "0", "0"], "omega": ["1", "-2", "1/2"]},
+   "sensor_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+   "parts": null,
+   "p": ["1/2", "1", "-1"],
+   "name": "centripetal_only",
+   "mass_properties":
+   {"mass": "3",
+    "inertia": [["1", "0", "0"], ["0", "2", "0"], ["0", "0", "4"]],
+    "com": ["1", "-1/2", "2"]},
+   "gravity": ["0", "0", "0"],
+   "expected":
+   {"tip_twist":
+    {"v": ["8/13", "5/4", "63/26"], "omega": ["19/26", "-2", "11/13"]},
+    "tip_accel":
+    {"alpha": ["0", "0", "0"], "a": ["-307/52", "-5/4", "223/104"]},
+    "recovered_contact_wrench":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "power_inertial_work": "0",
+    "power_inertial_formula": "0",
+    "power_gravity_work": "0",
+    "power_gravity_formula": "0",
+    "origin_inertia":
+    [["55/4", "3/2", "-6"], ["3/2", "17", "3"], ["-6", "3", "31/4"]],
+    "measured_wrench":
+    {"torque": ["1787/1352", "-6171/1352", "-14129/676"],
+     "force": ["-3147/104", "-1707/104", "-267/52"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "3",
+     "inertia":
+     [["244/169", "0", "180/169"],
+      ["0", "2", "0"],
+      ["180/169", "0", "601/169"]],
+     "com": ["57/26", "1/2", "6/13"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["1787/1352", "-6171/1352", "-14129/676"],
+     "force": ["-3147/104", "-1707/104", "-267/52"]},
+    "inertial_wrench":
+    {"torque": ["1787/1352", "-6171/1352", "-14129/676"],
+     "force": ["-3147/104", "-1707/104", "-267/52"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "gravity_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "first_moment": ["3", "-3/2", "6"],
+    "com_accel": ["-5849/676", "-569/104", "-7381/1352"]},
+   "R": [["12/13", "0", "5/13"], ["0", "1", "0"], ["-5/13", "0", "12/13"]]},
+  {"tip_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+   "sensor_twist": {"v": ["0", "0", "0"], "omega": ["1", "1", "0"]},
+   "sensor_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+   "parts": null,
+   "p": ["0", "0", "0"],
+   "name": "gyroscopic_only",
+   "mass_properties":
+   {"mass": "1",
+    "inertia": [["2", "0", "0"], ["0", "1", "0"], ["0", "0", "1/2"]],
+    "com": ["0", "0", "0"]},
+   "gravity": ["0", "0", "0"],
+   "expected":
+   {"tip_twist": {"v": ["0", "0", "0"], "omega": ["1", "1", "0"]},
+    "tip_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+    "recovered_contact_wrench":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "power_inertial_work": "0",
+    "power_inertial_formula": "0",
+    "power_gravity_work": "0",
+    "power_gravity_formula": "0",
+    "origin_inertia": [["2", "0", "0"], ["0", "1", "0"], ["0", "0", "1/2"]],
+    "measured_wrench": {"torque": ["0", "0", "-1"], "force": ["0", "0", "0"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "1",
+     "inertia": [["2", "0", "0"], ["0", "1", "0"], ["0", "0", "1/2"]],
+     "com": ["0", "0", "0"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["0", "0", "-1"], "force": ["0", "0", "0"]},
+    "inertial_wrench": {"torque": ["0", "0", "-1"], "force": ["0", "0", "0"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "gravity_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "first_moment": ["0", "0", "0"],
+    "com_accel": ["0", "0", "0"]},
+   "R": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]]},
+  {"tip_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+   "sensor_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+   "sensor_accel": {"alpha": ["0", "0", "0"], "a": ["3/2", "-1", "2"]},
+   "parts": null,
+   "p": ["2", "0", "-1/2"],
+   "name": "off_center_accelerating",
+   "mass_properties":
+   {"mass": "5/2",
+    "inertia": [["2", "1/3", "0"], ["1/3", "7/2", "0"], ["0", "0", "3/4"]],
+    "com": ["1/2", "3/4", "-1"]},
+   "gravity": ["0", "0", "0"],
+   "expected":
+   {"tip_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+    "tip_accel": {"alpha": ["0", "0", "0"], "a": ["21/17", "-29/34", "38/17"]},
+    "recovered_contact_wrench":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "power_inertial_work": "0",
+    "power_inertial_formula": "0",
+    "power_gravity_work": "0",
+    "power_gravity_formula": "0",
+    "origin_inertia":
+    [["189/32", "-29/48", "5/4"],
+     ["-29/48", "53/8", "15/8"],
+     ["5/4", "15/8", "89/32"]],
+    "measured_wrench":
+    {"torque": ["267/68", "-1815/136", "-327/34"],
+     "force": ["15/4", "-5/2", "5"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "5/2",
+     "inertia":
+     [["111/50", "-47/85", "-376/1275"],
+      ["-47/85", "786/289", "1518/1445"],
+      ["-376/1275", "1518/1445", "37867/28900"]],
+     "com": ["39/20", "43/34", "-163/170"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["267/68", "-1815/136", "-327/34"],
+     "force": ["15/4", "-5/2", "5"]},
+    "inertial_wrench":
+    {"torque": ["267/68", "-1815/136", "-327/34"],
+     "force": ["15/4", "-5/2", "5"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "gravity_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "first_moment": ["5/4", "15/8", "-5/2"],
+    "com_accel": ["21/17", "-29/34", "38/17"]},
+   "R":
+   [["4/5", "-3/5", "0"],
+    ["9/17", "12/17", "-8/17"],
+    ["24/85", "32/85", "15/17"]]},
+  {"tip_wrench": {"torque": ["-1/2", "1/3", "3/2"], "force": ["2", "-3", "1"]},
+   "sensor_twist": {"v": ["1/2", "-1", "2"], "omega": ["-3/4", "1/3", "1"]},
+   "sensor_accel": {"alpha": ["1/3", "-2", "1/2"], "a": ["2", "1/2", "-1"]},
+   "parts": null,
+   "p": ["-3/2", "2", "1"],
+   "name": "full_motion_rotated",
+   "mass_properties":
+   {"mass": "2",
+    "inertia":
+    [["5/2", "1/3", "-1/2"], ["1/3", "4", "2/3"], ["-1/2", "2/3", "7/2"]],
+    "com": ["1/3", "1/2", "-3/4"]},
+   "gravity": ["1", "1/2", "-10"],
+   "expected":
+   {"tip_twist":
+    {"v": ["-144/65", "-719/1326", "2081/4420"],
+     "omega": ["-49/65", "879/884", "1132/3315"]},
+    "tip_accel":
+    {"alpha": ["-137/130", "-1021/663", "1036/1105"],
+     "a": ["-893/720", "-649/204", "-547/340"]},
+    "recovered_contact_wrench":
+    {"torque": ["-1/2", "1/3", "3/2"], "force": ["2", "-3", "1"]},
+    "power_inertial_work": "152451601/10989225",
+    "power_inertial_formula": "152451601/10989225",
+    "power_gravity_work": "-27869/1530",
+    "power_gravity_formula": "-27869/1530",
+    "origin_inertia":
+    [["33/8", "0", "0"], ["0", "385/72", "17/12"], ["0", "17/12", "38/9"]],
+    "measured_wrench":
+    {"torque":
+     ["12906481741/263741400", "1493063101/58609200", "4428592187/263741400"],
+     "force": ["41521/15912", "-386981/35360", "3597563/238680"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "2",
+     "inertia":
+     [["9068/4225", "-38924/215475", "983/8619"],
+      ["-38924/215475", "9117871/2442050", "48753/97682"],
+      ["983/8619", "48753/97682", "402453/97682"]],
+     "com": ["-121/65", "12029/4420", "317/663"]},
+    "inertial_wrench_from_tip":
+    {"torque":
+     ["-1397292419/263741400", "-231167353/19536400", "3173970767/263741400"],
+     "force": ["113357/79560", "-298277/35360", "-67369/18360"]},
+    "inertial_wrench":
+    {"torque":
+     ["-1397292419/263741400", "-231167353/19536400", "3173970767/263741400"],
+     "force": ["113357/79560", "-298277/35360", "-67369/18360"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["-36404/663", "-1850/51", "-16143/2210"],
+     "force": ["2", "1", "-20"]},
+    "gravity_wrench":
+    {"torque": ["-36404/663", "-1850/51", "-16143/2210"],
+     "force": ["2", "1", "-20"]},
+    "first_moment": ["2/3", "1", "-3/2"],
+    "com_accel":
+    ["-17131489/15514200", "-79231517/17582760", "-86906767/234436800"]},
+   "R":
+   [["48/65", "-5/13", "36/65"],
+    ["36/65", "180/221", "-191/1105"],
+    ["-5/13", "96/221", "180/221"]]},
+  {"tip_wrench": {"torque": ["1", "1", "1"], "force": ["1", "1", "1"]},
+   "sensor_twist": {"v": ["1", "2", "3"], "omega": ["1", "2", "3"]},
+   "sensor_accel": {"alpha": ["-1", "-2", "-3"], "a": ["3", "2", "1"]},
+   "parts": null,
+   "p": ["1", "1", "1"],
+   "name": "full_motion_identity",
+   "mass_properties":
+   {"mass": "1",
+    "inertia": [["1", "1/2", "0"], ["1/2", "2", "1/3"], ["0", "1/3", "3/2"]],
+    "com": ["-1", "2", "1/2"]},
+   "gravity": ["0", "0", "-5"],
+   "expected":
+   {"tip_twist": {"v": ["0", "4", "2"], "omega": ["1", "2", "3"]},
+    "tip_accel": {"alpha": ["-1", "-2", "-3"], "a": ["-4", "-2", "6"]},
+    "recovered_contact_wrench":
+    {"torque": ["1", "1", "1"], "force": ["1", "1", "1"]},
+    "power_inertial_work": "-335/4",
+    "power_inertial_formula": "-335/4",
+    "power_gravity_work": "-30",
+    "power_gravity_formula": "-30",
+    "origin_inertia":
+    [["21/4", "5/2", "1/2"], ["5/2", "13/4", "-2/3"], ["1/2", "-2/3", "13/2"]],
+    "measured_wrench":
+    {"torque": ["715/12", "307/12", "-367/6"],
+     "force": ["41/2", "-33/2", "29/2"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "1",
+     "inertia": [["1", "1/2", "0"], ["1/2", "2", "1/3"], ["0", "1/3", "3/2"]],
+     "com": ["0", "3", "3/2"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["523/12", "295/12", "-373/6"],
+     "force": ["39/2", "-35/2", "17/2"]},
+    "inertial_wrench":
+    {"torque": ["523/12", "295/12", "-373/6"],
+     "force": ["39/2", "-35/2", "17/2"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["-15", "0", "0"], "force": ["0", "0", "-5"]},
+    "gravity_wrench": {"torque": ["-15", "0", "0"], "force": ["0", "0", "-5"]},
+    "first_moment": ["-1", "2", "1/2"],
+    "com_accel": ["39/2", "-35/2", "17/2"]},
+   "R": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]]},
+  {"tip_wrench": {"torque": ["0", "1", "0"], "force": ["1", "-1", "2"]},
+   "sensor_twist": {"v": ["1", "0", "-1"], "omega": ["0", "1", "0"]},
+   "sensor_accel": {"alpha": ["0", "0", "1/2"], "a": ["1", "1", "1"]},
+   "parts": null,
+   "p": ["1/2", "-1", "2"],
+   "name": "zero_inertia",
+   "mass_properties":
+   {"mass": "2",
+    "inertia": [["0", "0", "0"], ["0", "0", "0"], ["0", "0", "0"]],
+    "com": ["3/4", "1/2", "-1/4"]},
+   "gravity": ["0", "0", "-4"],
+   "expected":
+   {"tip_twist": {"v": ["87/26", "0", "-3/13"], "omega": ["0", "1", "0"]},
+    "tip_accel":
+    {"alpha": ["-5/26", "0", "6/13"], "a": ["17/13", "5/4", "-7/13"]},
+    "recovered_contact_wrench":
+    {"torque": ["0", "1", "0"], "force": ["1", "-1", "2"]},
+    "power_inertial_work": "289/104",
+    "power_inertial_formula": "289/104",
+    "power_gravity_work": "218/13",
+    "power_gravity_formula": "218/13",
+    "origin_inertia":
+    [["5/8", "-3/4", "3/8"], ["-3/4", "5/4", "1/4"], ["3/8", "1/4", "13/8"]],
+    "measured_wrench":
+    {"torque": ["-20457/2704", "-375/104", "12817/2704"],
+     "force": ["2", "109/52", "17/2"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "2",
+     "inertia": [["0", "0", "0"], ["0", "0", "0"], ["0", "0", "0"]],
+     "com": ["57/52", "-1/2", "77/52"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["-11097/2704", "157/104", "9593/2704"],
+     "force": ["4/13", "161/52", "-25/26"]},
+    "inertial_wrench":
+    {"torque": ["-11097/2704", "157/104", "9593/2704"],
+     "force": ["4/13", "161/52", "-25/26"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["4", "114/13", "0"], "force": ["0", "0", "-8"]},
+    "gravity_wrench":
+    {"torque": ["4", "114/13", "0"], "force": ["0", "0", "-8"]},
+    "first_moment": ["3/2", "1", "-1/2"],
+    "com_accel": ["17/52", "161/104", "-5/13"]},
+   "R": [["12/13", "0", "5/13"], ["0", "1", "0"], ["-5/13", "0", "12/13"]]},
+  {"tip_wrench": {"torque": ["1/2", "-1", "0"], "force": ["-1", "2", "3"]},
+   "sensor_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+   "sensor_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+   "parts": null,
+   "p": ["-2", "1", "1/2"],
+   "name": "zero_motion",
+   "mass_properties":
+   {"mass": "3",
+    "inertia": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]],
+    "com": ["1", "1", "1"]},
+   "gravity": ["0", "0", "0"],
+   "expected":
+   {"tip_twist": {"v": ["0", "0", "0"], "omega": ["0", "0", "0"]},
+    "tip_accel": {"alpha": ["0", "0", "0"], "a": ["0", "0", "0"]},
+    "recovered_contact_wrench":
+    {"torque": ["1/2", "-1", "0"], "force": ["-1", "2", "3"]},
+    "power_inertial_work": "0",
+    "power_inertial_formula": "0",
+    "power_gravity_work": "0",
+    "power_gravity_formula": "0",
+    "origin_inertia": [["7", "-3", "-3"], ["-3", "7", "-3"], ["-3", "-3", "7"]],
+    "measured_wrench":
+    {"torque": ["17/10", "51/10", "-24/5"], "force": ["2/5", "11/5", "3"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "3",
+     "inertia": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]],
+     "com": ["-3/5", "6/5", "3/2"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "inertial_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "gravity_wrench": {"torque": ["0", "0", "0"], "force": ["0", "0", "0"]},
+    "first_moment": ["3", "3", "3"],
+    "com_accel": ["0", "0", "0"]},
+   "R": [["4/5", "3/5", "0"], ["-3/5", "4/5", "0"], ["0", "0", "1"]]},
+  {"tip_wrench": {"torque": ["0", "1/2", "1"], "force": ["1", "2", "-1"]},
+   "sensor_twist": {"v": ["1/2", "1", "-1/2"], "omega": ["2", "-1", "1/3"]},
+   "sensor_accel": {"alpha": ["1", "1/2", "-1"], "a": ["-1", "1/2", "2"]},
+   "parts":
+   [{"mass": "2",
+     "inertia": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]],
+     "com": ["1", "0", "0"]},
+    {"mass": "2",
+     "inertia": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]],
+     "com": ["0", "1", "0"]}],
+   "p": ["1", "0", "-1"],
+   "name": "composition_tool_payload",
+   "mass_properties":
+   {"mass": "4",
+    "inertia": [["3", "1", "0"], ["1", "3", "0"], ["0", "0", "4"]],
+    "com": ["1/2", "1/2", "0"]},
+   "gravity": ["0", "1", "-5"],
+   "expected":
+   {"tip_twist": {"v": ["16/5", "53/30", "1/2"], "omega": ["1", "-2", "1/3"]},
+    "tip_accel":
+    {"alpha": ["11/10", "-1/5", "-1"], "a": ["-299/90", "31/30", "43/6"]},
+    "recovered_contact_wrench":
+    {"torque": ["0", "1/2", "1"], "force": ["1", "2", "-1"]},
+    "power_inertial_work": "-1553/90",
+    "power_inertial_formula": "-1553/90",
+    "power_gravity_work": "-398/15",
+    "power_gravity_formula": "-398/15",
+    "origin_inertia": [["4", "0", "0"], ["0", "4", "0"], ["0", "0", "6"]],
+    "measured_wrench":
+    {"torque": ["1613/90", "-1649/45", "-238/15"],
+     "force": ["-754/45", "-863/45", "248/5"]},
+    "mass_properties_in_sensor_frame":
+    {"mass": "4",
+     "inertia":
+     [["51/25", "7/25", "0"], ["7/25", "99/25", "0"], ["0", "0", "4"]],
+     "com": ["11/10", "7/10", "-1"]},
+    "inertial_wrench_from_tip":
+    {"torque": ["271/45", "-148/9", "-44/3"],
+     "force": ["-736/45", "-782/45", "153/5"]},
+    "inertial_wrench":
+    {"torque": ["271/45", "-148/9", "-44/3"],
+     "force": ["-736/45", "-782/45", "153/5"]},
+    "gravity_wrench_from_tip":
+    {"torque": ["-10", "22", "22/5"], "force": ["0", "4", "-20"]},
+    "gravity_wrench":
+    {"torque": ["-10", "22", "22/5"], "force": ["0", "4", "-20"]},
+    "first_moment": ["2", "2", "0"],
+    "com_accel": ["-529/90", "-46/45", "153/20"]},
+   "R": [["4/5", "-3/5", "0"], ["3/5", "4/5", "0"], ["0", "0", "1"]]}],
  "conventions":
- "R rotates tip coordinates into sensor coordinates, p is the tip origin in sensor coordinates, rows are row-major so `R i j` is Python `R[i][j]`, and every numeral is an exact integer or \"num/den\" string.",
+ "R rotates tip coordinates into sensor coordinates, p is the tip origin in sensor coordinates, rows are row-major so `R i j` is Python `R[i][j]`, and every numeral is an exact integer or \"num/den\" string. In dynamics cases the mass properties are given in tip coordinates, the twist, acceleration and gravity in sensor coordinates, the tip wrench is the external wrench at the tip in tip coordinates, and the gravity vector is the gravitational acceleration (pointing down), so a sensor holding a body at rest reads minus its gravity wrench.",
  "chains":
  [{"tip_wrench": {"torque": ["0", "1", "-1/2"], "force": ["2", "-1", "1"]},
    "sensor_twist": {"v": ["1", "0", "-1/2"], "omega": ["0", "1/2", "2"]},

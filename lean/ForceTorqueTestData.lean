@@ -9,6 +9,7 @@ public import Mathlib.Data.Fin.VecNotation
 public import Mathlib.Data.Matrix.Basic
 public import Mathlib.LinearAlgebra.Matrix.Notation
 public import TorqueWrench
+public import Dynamics
 
 open Lean (Json)
 open Matrix
@@ -335,14 +336,290 @@ def chainJson (c : Chain) : Json :=
       ("tip_twist_one_step", twistJson (sensorTwistToTip p R c.sensorTwist)),
       ("tip_twist_two_steps", twistJson (sensorTwistToTip c.p₂ c.R₂ (sensorTwistToTip c.p₁ c.R₁ c.sensorTwist)))])]
 
+/-! ## Dynamics cases
+
+The static cases above cover the frame algebra. These cover the measurement model: a body distal
+to the sensor (mass, centre of mass, inertia), its motion and a gravitational acceleration in
+sensor coordinates, and a contact wrench at the tip. What is stored is what the model *predicts*,
+including both sides of the covariance identity, the parallel-axis form, the power identities and
+the recovered contact wrench, so that a Python implementation can recompute every number from the
+same inputs and be compared exactly.
+
+The case list is chosen so that a wrong sign or a missing term cannot pass: gravity alone at rest
+(the sensor reads minus the gravity wrench), an off-centre centre of mass under pure acceleration,
+a purely centripetal motion, a gyroscopic torque from an anisotropic inertia, a non-diagonal
+inertia, and a body assembled from two parts.
+-/
+
+/-- A symmetric inertia tensor from its six independent entries. -/
+def symInertia (i₁₁ i₁₂ i₁₃ i₂₂ i₂₃ i₃₃ : ℚ) : Mat :=
+  !![i₁₁, i₁₂, i₁₃; i₁₂, i₂₂, i₂₃; i₁₃, i₂₃, i₃₃]
+
+theorem symInertia_symm (i₁₁ i₁₂ i₁₃ i₂₂ i₂₃ i₃₃ : ℚ) :
+    (symInertia i₁₁ i₁₂ i₁₃ i₂₂ i₂₃ i₃₃)ᵀ = symInertia i₁₁ i₁₂ i₁₃ i₂₂ i₂₃ i₃₃ := by
+  ext r c
+  fin_cases r <;> fin_cases c <;> simp [symInertia, Matrix.transpose_apply]
+
+/-- A body: mass, centre of mass relative to the frame origin, and inertia about the centre of
+mass, given by its six independent entries so that symmetry is by construction. -/
+def body (mass : ℚ) (com : Vec) (i₁₁ i₁₂ i₁₃ i₂₂ i₂₃ i₃₃ : ℚ) : MassProperties ℚ :=
+  ⟨mass, com, symInertia i₁₁ i₁₂ i₁₃ i₂₂ i₂₃ i₃₃, symInertia_symm ..⟩
+
+/-- An acceleration, as the model's `Accel`. -/
+def accel (a alpha : Vec) : Accel ℚ := ⟨a, alpha⟩
+
+/-- An `Accel` has no `DecidableEq`, so the checks compare components. -/
+def accelEq (a b : Accel ℚ) : Bool := decide (a.a = b.a) && decide (a.alpha = b.alpha)
+
+/-- One dynamics case: the body, its motion and gravity in sensor coordinates, and a contact
+wrench at the tip in tip coordinates. `parts`, when given, names two bodies this one claims to be
+the rigid combination of. -/
+structure DynamicsCase where
+  name : String
+  /-- The tip origin, in sensor coordinates. -/
+  p : Vec
+  /-- The rotation from tip coordinates to sensor coordinates. -/
+  R : Mat
+  /-- The body distal to the sensor, in tip coordinates. -/
+  mp : MassProperties ℚ
+  /-- The gravitational acceleration, in sensor coordinates. -/
+  g : Vec
+  /-- The body's twist, in sensor coordinates. -/
+  sensorTwist : Twist ℚ
+  /-- The body's acceleration, in sensor coordinates. -/
+  sensorAccel : Accel ℚ
+  /-- The external wrench at the tip, in tip coordinates. -/
+  tipWrench : Wrench ℚ
+  /-- Two bodies whose combination this one is, when the case exercises composition. -/
+  parts : Option (MassProperties ℚ × MassProperties ℚ) := none
+
+/-- The dynamics cases. Masses, centres of mass and inertias are small rationals, and the
+motions are chosen one effect at a time (gravity only, centripetal only, gyroscopic only,
+off-centre acceleration) plus full-motion cases where everything is non-zero at once. -/
+def dynamicsCases : List DynamicsCase := [
+  -- No motion, no contact: the sensor reads exactly the negative of the gravity wrench, and
+  -- compensation recovers nothing. This is the case a sign error in gravity fails.
+  { name := "rest_gravity_only"
+    p := ![0, 0, 3 / 2]
+    R := rotZ 1 0
+    mp := body 2 ![1 / 4, 0, -1 / 2] 1 0 0 (3 / 2) 0 (5 / 2)
+    g := ![0, 0, -981 / 100]
+    sensorTwist := twist ![0, 0, 0] ![0, 0, 0]
+    sensorAccel := accel ![0, 0, 0] ![0, 0, 0]
+    tipWrench := wrench ![0, 0, 0] ![0, 0, 0] },
+  -- The same, rotated, with the gravity vector and the body off the frame axes: a dropped `R`
+  -- on `g` or on the centre of mass shows up here.
+  { name := "rest_gravity_rotated"
+    p := ![-1 / 2, 1, 2]
+    R := rotZ (4 / 5) (3 / 5) * rotY (12 / 13) (5 / 13)
+    mp := body (3 / 2) ![1 / 3, -2, 1 / 2] (7 / 4) (1 / 2) (-1 / 3) (5 / 2) (2 / 3) (11 / 4)
+    g := ![-1, 2, -9]
+    sensorTwist := twist ![0, 0, 0] ![0, 0, 0]
+    sensorAccel := accel ![0, 0, 0] ![0, 0, 0]
+    tipWrench := wrench ![0, 0, 0] ![0, 0, 0] },
+  -- Static contact through a rotated, offset mounting: gravity plus inertia compensation has to
+  -- return the applied wrench exactly, which is the whole point of the model.
+  { name := "rest_gravity_with_contact"
+    p := ![1, -1 / 2, 3]
+    R := rotX (15 / 17) (8 / 17)
+    mp := body 2 ![-3 / 4, 1 / 2, 1] 2 (1 / 4) 0 (5 / 2) (-1 / 2) 3
+    g := ![1 / 2, 0, -49 / 5]
+    sensorTwist := twist ![0, 0, 0] ![0, 0, 0]
+    sensorAccel := accel ![0, 0, 0] ![0, 0, 0]
+    tipWrench := wrench ![3, -2, 1] ![1 / 2, 1, -1 / 3] },
+  -- Pure spin with no linear or angular acceleration: the only force is the centripetal
+  -- `m ω × (ω × c)`, which a model that drops the centripetal term reports as zero.
+  { name := "centripetal_only"
+    p := ![1 / 2, 1, -1]
+    R := rotY (12 / 13) (5 / 13)
+    mp := body 3 ![1, -1 / 2, 2] 1 0 0 2 0 4
+    g := ![0, 0, 0]
+    sensorTwist := twist ![0, 0, 0] ![1, -2, 1 / 2]
+    sensorAccel := accel ![0, 0, 0] ![0, 0, 0]
+    tipWrench := wrench ![0, 0, 0] ![0, 0, 0] },
+  -- Spin about a non-principal axis with a non-isotropic inertia: the torque is the gyroscopic
+  -- `ω × (I ω)`, which a model that forgets it reports as zero.
+  { name := "gyroscopic_only"
+    p := ![0, 0, 0]
+    R := rotZ 1 0
+    mp := body 1 ![0, 0, 0] 2 0 0 1 0 (1 / 2)
+    g := ![0, 0, 0]
+    sensorTwist := twist ![0, 0, 0] ![1, 1, 0]
+    sensorAccel := accel ![0, 0, 0] ![0, 0, 0]
+    tipWrench := wrench ![0, 0, 0] ![0, 0, 0] },
+  -- Pure linear acceleration of an off-centre body: force `m a`, torque `c × (m a)`.
+  { name := "off_center_accelerating"
+    p := ![2, 0, -1 / 2]
+    R := rotX (15 / 17) (8 / 17) * rotZ (4 / 5) (3 / 5)
+    mp := body (5 / 2) ![1 / 2, 3 / 4, -1] 2 (1 / 3) 0 (7 / 2) 0 (3 / 4)
+    g := ![0, 0, 0]
+    sensorTwist := twist ![0, 0, 0] ![0, 0, 0]
+    sensorAccel := accel ![3 / 2, -1, 2] ![0, 0, 0]
+    tipWrench := wrench ![0, 0, 0] ![0, 0, 0] },
+  -- Everything at once: a general rotation, an off-axis centre of mass, a non-diagonal inertia,
+  -- a general twist and acceleration, and gravity.
+  { name := "full_motion_rotated"
+    p := ![-3 / 2, 2, 1]
+    R := rotZ (4 / 5) (3 / 5) * rotY (12 / 13) (5 / 13) * rotX (15 / 17) (8 / 17)
+    mp := body 2 ![1 / 3, 1 / 2, -3 / 4] (5 / 2) (1 / 3) (-1 / 2) 4 (2 / 3) (7 / 2)
+    g := ![1, 1 / 2, -10]
+    sensorTwist := twist ![1 / 2, -1, 2] ![-3 / 4, 1 / 3, 1]
+    sensorAccel := accel ![2, 1 / 2, -1] ![1 / 3, -2, 1 / 2]
+    tipWrench := wrench ![2, -3, 1] ![-1 / 2, 1 / 3, 3 / 2] },
+  { name := "full_motion_identity"
+    p := ![1, 1, 1]
+    R := rotZ 1 0
+    mp := body 1 ![-1, 2, 1 / 2] 1 (1 / 2) 0 2 (1 / 3) (3 / 2)
+    g := ![0, 0, -5]
+    sensorTwist := twist ![1, 2, 3] ![1, 2, 3]
+    sensorAccel := accel ![3, 2, 1] ![-1, -2, -3]
+    tipWrench := wrench ![1, 1, 1] ![1, 1, 1] },
+  -- A point mass: no inertia couple at all, so the torque is only `c × F`.
+  { name := "zero_inertia"
+    p := ![1 / 2, -1, 2]
+    R := rotY (12 / 13) (5 / 13)
+    mp := body 2 ![3 / 4, 1 / 2, -1 / 4] 0 0 0 0 0 0
+    g := ![0, 0, -4]
+    sensorTwist := twist ![1, 0, -1] ![0, 1, 0]
+    sensorAccel := accel ![1, 1, 1] ![0, 0, 1 / 2]
+    tipWrench := wrench ![1, -1, 2] ![0, 1, 0] },
+  -- No motion and no gravity: the measurement is the plain static transform.
+  { name := "zero_motion"
+    p := ![-2, 1, 1 / 2]
+    R := rotZ (4 / 5) (-3 / 5)
+    mp := body 3 ![1, 1, 1] 1 0 0 1 0 1
+    g := ![0, 0, 0]
+    sensorTwist := twist ![0, 0, 0] ![0, 0, 0]
+    sensorAccel := accel ![0, 0, 0] ![0, 0, 0]
+    tipWrench := wrench ![-1, 2, 3] ![1 / 2, -1, 0] },
+  -- Two bodies and their rigid combination: the composite's mass, first moment and inertia about
+  -- the origin are the sums of the parts', and so are its wrenches.
+  -- Two unit cubes of mass 2 at `(1,0,0)` and `(0,1,0)`: the combination sits at `(1/2,1/2,0)`
+  -- with mass 4 and inertia `[[3,1,0],[1,3,0],[0,0,4]]` about its own centre, so all three
+  -- additive quantities are exact rationals rather than approximations.
+  { name := "composition_tool_payload"
+    p := ![1, 0, -1]
+    R := rotZ (4 / 5) (3 / 5)
+    mp := body 4 ![1 / 2, 1 / 2, 0] 3 1 0 3 0 4
+    g := ![0, 1, -5]
+    sensorTwist := twist ![1 / 2, 1, -1 / 2] ![2, -1, 1 / 3]
+    sensorAccel := accel ![-1, 1 / 2, 2] ![1, 1 / 2, -1]
+    tipWrench := wrench ![1, 2, -1] ![0, 1 / 2, 1]
+    parts := some (body 2 ![1, 0, 0] 1 0 0 1 0 1, body 2 ![0, 1, 0] 1 0 0 1 0 1) }]
+
+/-- The invariants a dynamics case has to satisfy, re-derived by evaluation: the two sides of the
+covariance theorems, the parallel-axis form, both power identities, and exact recovery of the
+contact wrench. -/
+def dynamicsFailures (c : DynamicsCase) : List String :=
+  let mpS := tipMassToSensor c.p c.R c.mp
+  let tipTwist := sensorTwistToTip c.p c.R c.sensorTwist
+  let tipAccel := sensorAccelToTip c.p c.R c.sensorTwist c.sensorAccel
+  let tipInertial := inertialWrench c.mp tipTwist tipAccel
+  let sensorInertial := inertialWrench mpS c.sensorTwist c.sensorAccel
+  let tipGravity := gravityWrench c.mp (c.Rᵀ *ᵥ c.g)
+  let sensorGravity := gravityWrench mpS c.g
+  let measured := measuredWrench c.p c.R c.mp c.sensorTwist c.sensorAccel c.g c.tipWrench
+  let recovered := recoveredContactWrench c.p c.R c.mp c.sensorTwist c.sensorAccel c.g measured
+  let powerInertial := virtualWork (inertialWrench c.mp tipTwist tipAccel) tipTwist
+  let powerGravity := virtualWork (gravityWrench c.mp (c.Rᵀ *ᵥ c.g)) tipTwist
+  (if c.Rᵀ * c.R = 1 ∧ c.R.det = 1 then [] else ["R is not a rotation"])
+    ++ (if accelEq (sensorAccelToTip c.p c.R (tipTwistToSensor c.p c.R tipTwist)
+          (tipAccelToSensor c.p c.R tipTwist tipAccel)) tipAccel then []
+        else ["the acceleration transform does not round trip"])
+    ++ (if wrenchEq (tipToSensor c.p c.R tipInertial) sensorInertial then []
+        else ["the inertial wrench does not transport between the frames"])
+    ++ (if wrenchEq (tipToSensor c.p c.R tipGravity) sensorGravity then []
+        else ["the gravity wrench does not transport between the frames"])
+    ++ (if wrenchEq tipInertial
+          (spatialInertialWrench c.mp.mass (firstMoment c.mp) (originInertia c.mp) tipTwist
+            tipAccel) then []
+        else ["the origin form of the inertial wrench disagrees with the centre-of-mass form"])
+    ++ (if powerInertial = c.mp.mass *
+          dot (comAccel c.mp tipTwist tipAccel) (tipTwist.v + cross tipTwist.ω c.mp.com)
+          + dot tipAccel.alpha (c.mp.inertia *ᵥ tipTwist.ω) then []
+        else ["the inertial power identity fails"])
+    ++ (if powerGravity = c.mp.mass *
+          dot (c.Rᵀ *ᵥ c.g) (tipTwist.v + cross tipTwist.ω c.mp.com) then []
+        else ["the gravity power identity fails"])
+    ++ (if wrenchEq recovered c.tipWrench then []
+        else ["compensation did not recover the contact wrench"])
+    ++ (match c.parts with
+        | none => []
+        | some (mp₁, mp₂) =>
+          (if c.mp.mass = mp₁.mass + mp₂.mass then []
+            else ["the composite mass is not the sum of the parts"])
+            ++ (if firstMoment c.mp = firstMoment mp₁ + firstMoment mp₂ then []
+                else ["the composite first moment is not the sum of the parts"])
+            ++ (if originInertia c.mp = originInertia mp₁ + originInertia mp₂ then []
+                else ["the composite inertia about the origin is not the sum of the parts"])
+            ++ (if wrenchEq tipInertial (inertialWrench mp₁ tipTwist tipAccel +
+                  inertialWrench mp₂ tipTwist tipAccel) then []
+                else ["the inertial wrench is not additive in the parts"])
+            ++ (if wrenchEq (gravityWrench c.mp (c.Rᵀ *ᵥ c.g))
+                  (gravityWrench mp₁ (c.Rᵀ *ᵥ c.g) + gravityWrench mp₂ (c.Rᵀ *ᵥ c.g)) then []
+                else ["the gravity wrench is not additive in the parts"]))
+
+/-- The case as JSON: the inputs, and every quantity the Python implementation has to reproduce. -/
+def massJson (mp : MassProperties ℚ) : Json :=
+  .mkObj [("mass", ratJson mp.mass), ("com", vecJson mp.com), ("inertia", matJson mp.inertia)]
+
+def accelJson (x : Accel ℚ) : Json := .mkObj [("a", vecJson x.a), ("alpha", vecJson x.alpha)]
+
+def dynamicsCaseJson (c : DynamicsCase) : Json :=
+  let mpS := tipMassToSensor c.p c.R c.mp
+  let tipTwist := sensorTwistToTip c.p c.R c.sensorTwist
+  let tipAccel := sensorAccelToTip c.p c.R c.sensorTwist c.sensorAccel
+  let tipInertial := inertialWrench c.mp tipTwist tipAccel
+  let powerInertial := virtualWork tipInertial tipTwist
+  let powerGravity := virtualWork (gravityWrench c.mp (c.Rᵀ *ᵥ c.g)) tipTwist
+  .mkObj [
+    ("name", .str c.name),
+    ("p", vecJson c.p),
+    ("R", matJson c.R),
+    ("mass_properties", massJson c.mp),
+    ("gravity", vecJson c.g),
+    ("sensor_twist", twistJson c.sensorTwist),
+    ("sensor_accel", accelJson c.sensorAccel),
+    ("tip_wrench", wrenchJson c.tipWrench),
+    ("parts", match c.parts with
+      | none => .null
+      | some (mp₁, mp₂) => .arr #[massJson mp₁, massJson mp₂]),
+    ("expected", .mkObj [
+      ("mass_properties_in_sensor_frame", massJson mpS),
+      ("tip_twist", twistJson tipTwist),
+      ("tip_accel", accelJson tipAccel),
+      ("com_accel", vecJson (comAccel c.mp tipTwist tipAccel)),
+      ("first_moment", vecJson (firstMoment c.mp)),
+      ("origin_inertia", matJson (originInertia c.mp)),
+      ("inertial_wrench", wrenchJson (inertialWrench mpS c.sensorTwist c.sensorAccel)),
+      ("inertial_wrench_from_tip", wrenchJson (tipToSensor c.p c.R tipInertial)),
+      ("gravity_wrench", wrenchJson (gravityWrench mpS c.g)),
+      ("gravity_wrench_from_tip", wrenchJson (tipToSensor c.p c.R (gravityWrench c.mp (c.Rᵀ *ᵥ c.g)))),
+      ("power_inertial_work", ratJson powerInertial),
+      ("power_inertial_formula", ratJson (c.mp.mass *
+        dot (comAccel c.mp tipTwist tipAccel) (tipTwist.v + cross tipTwist.ω c.mp.com)
+        + dot tipAccel.alpha (c.mp.inertia *ᵥ tipTwist.ω))),
+      ("power_gravity_work", ratJson powerGravity),
+      ("power_gravity_formula", ratJson (c.mp.mass *
+        dot (c.Rᵀ *ᵥ c.g) (tipTwist.v + cross tipTwist.ω c.mp.com))),
+      ("measured_wrench", wrenchJson (measuredWrench c.p c.R c.mp c.sensorTwist c.sensorAccel c.g c.tipWrench)),
+      ("recovered_contact_wrench", wrenchJson (recoveredContactWrench c.p c.R c.mp c.sensorTwist
+        c.sensorAccel c.g (measuredWrench c.p c.R c.mp c.sensorTwist c.sensorAccel c.g c.tipWrench)))])]
+
 def document : Json := .mkObj [
-  ("schema_version", (2 : Json)),
-  ("source", .str "lean/TorqueWrench.lean, evaluated over the rationals (exact)"),
+  ("schema_version", (3 : Json)),
+  ("source", .str "lean/TorqueWrench.lean and lean/Dynamics.lean, evaluated over the rationals \
+    (exact)"),
   ("conventions", .str "R rotates tip coordinates into sensor coordinates, p is the tip \
     origin in sensor coordinates, rows are row-major so `R i j` is Python `R[i][j]`, and \
-    every numeral is an exact integer or \"num/den\" string."),
+    every numeral is an exact integer or \"num/den\" string. In dynamics cases the mass \
+    properties are given in tip coordinates, the twist, acceleration and gravity in sensor \
+    coordinates, the tip wrench is the external wrench at the tip in tip coordinates, and the \
+    gravity vector is the gravitational acceleration (pointing down), so a sensor holding a \
+    body at rest reads minus its gravity wrench."),
   ("cases", .arr (cases.map caseJson).toArray),
-  ("chains", .arr (chains.map chainJson).toArray)]
+  ("chains", .arr (chains.map chainJson).toArray),
+  ("dynamics_cases", .arr (dynamicsCases.map dynamicsCaseJson).toArray)]
 
 end ForceTorqueTestData
 
@@ -362,6 +639,10 @@ def main (args : List String) : IO UInt32 := do
       match chainFailures c with
       | [] => none
       | fs => some (c.name, fs))
+    ++ (dynamicsCases.filterMap fun c =>
+      match dynamicsFailures c with
+      | [] => none
+      | fs => some (c.name, fs))
   unless failures.isEmpty do
     IO.eprintln "refusing to write test data: a case failed its checks"
     for (name, fs) in failures do
@@ -371,5 +652,6 @@ def main (args : List String) : IO UInt32 := do
   if let some dir := (System.FilePath.mk path).parent then
     IO.FS.createDirAll dir
   IO.FS.writeFile path (Json.pretty document ++ "\n")
-  IO.println s!"wrote {cases.length} cases and {chains.length} chains to {path}"
+  IO.println s!"wrote {cases.length} cases, {chains.length} chains and \
+    {dynamicsCases.length} dynamics cases to {path}"
   return 0

@@ -1,6 +1,6 @@
 name = "robot_arm"
 version = "0.1.0"
-defaultTargets = ["TorqueWrench", "Kinematics"]
+defaultTargets = ["TorqueWrench", "Kinematics", "Dynamics"]
 
 [[require]]
 name = "mathlib"
@@ -15,6 +15,11 @@ name = "TorqueWrench"
 # will build on. See the TODO at the end of it for the one structural fact still missing.
 [[lean_lib]]
 name = "Kinematics"
+
+# Inertia, gravity and the sensor measurement model, built on `TorqueWrench`; still a pure
+# proof library, so it is in `defaultTargets` with it.
+[[lean_lib]]
+name = "Dynamics"
 
 # Evaluates the transforms on the exact-rational cases and writes
 # ../test_data/force_torque_frames.json. Not in `defaultTargets`: `lake build` stays a
