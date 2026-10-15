@@ -1,0 +1,70 @@
+# CI: the Python test suite and the Lean proof build.
+#
+# The two jobs are independent -- neither needs the other's toolchain. The Python
+# tests read the committed ``test_data/force_torque_frames.json``; the Lean job proves
+# the libraries that generate it.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Neither job writes anything back to the repository.
+permissions:
+  contents: read
+
+# Supersede an in-flight run when a newer commit arrives on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      # The suite is unittest-based, so it needs no runner beyond the standard
+      # library: ``discover`` picks up ``test_kinematics.py`` and
+      # ``test_force_torque.py``.
+      #
+      # Much of ``test_kinematics.py`` drives real Tk widgets, and those tests skip
+      # themselves when there is no display -- Xvfb, which the runner image ships,
+      # keeps them running for real instead of quietly dropping out of the run.
+      - name: Run tests
+        run: xvfb-run -a python -m unittest discover -v -p "test_*.py"
+
+  lean-build:
+    name: Lean build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # lean-action installs the toolchain ``lean/lean-toolchain`` pins, pulls the
+      # prebuilt Mathlib oleans with ``lake exe cache get`` and caches ``lean/.lake``,
+      # then runs ``lake build`` over the libraries in ``defaultTargets``. Compiling
+      # Mathlib from source is far too slow for CI, so that cache download is what
+      # makes this job practical.
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: lean
+          # ``lake build`` is the whole job: these libraries are proofs, so there is
+          # no test driver to run and nothing to gate on linting.
+          build: "true"
+          test: "false"
+          lint: "false"
