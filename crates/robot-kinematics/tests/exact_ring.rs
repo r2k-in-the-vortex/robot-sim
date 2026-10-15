@@ -11,13 +11,16 @@
 //! pairs as data makes the whole forward chain a polynomial, and a polynomial evaluates
 //! over any commutative ring.
 
-#[path = "support/mod.rs"]
-mod support;
-
+use robot_golden::Ratio as R;
 use robot_kinematics::{
     CosSin, Field, Geometry, Mat3, Pose, Vec3, carrier_pose_cs, fk_cs, wrist_center,
 };
-use support::{Ratio as R, pair, quarter_turn};
+
+/// The cosine and sine of a quarter turn, exactly: `Kinematics.quarter`, whose values
+/// are `0` and `1` with no rounding.
+fn quarter_turn() -> CosSin<R> {
+    CosSin::new(R::zero(), R::one())
+}
 
 fn geometry() -> Geometry<R> {
     Geometry::new(
@@ -71,11 +74,11 @@ fn a_pythagorean_configuration_gives_an_exact_pose() {
     let g = geometry();
     // cos = 4/5, sin = 3/5 for joint 1; cos = 5/13, sin = 12/13 for joint 2.
     let theta = [
-        pair((4, 5), (3, 5)),
+        R::pair((4, 5), (3, 5)),
         CosSin::new(R::ONE, R::ZERO),
         CosSin::new(R::ONE, R::ZERO),
         CosSin::new(R::ONE, R::ZERO),
-        pair((5, 13), (12, 13)),
+        R::pair((5, 13), (12, 13)),
         CosSin::new(R::ONE, R::ZERO),
     ];
     let pose = fk_cs(&g, &theta);
@@ -93,7 +96,7 @@ fn a_pythagorean_configuration_gives_an_exact_pose() {
     }
     // The rotation must still be orthogonal, exactly, over the rationals. This is
     // `fk_R_orth` with no tolerance: `Rᵀ R` is the identity on the nose.
-    let gram = pose.r.transpose().mul(pose.r);
+    let gram = pose.r.transpose() * pose.r;
     assert_eq!(gram, Mat3::<R>::identity());
 
     // The pose itself, against values derived independently of this crate — a
@@ -107,16 +110,16 @@ fn a_pythagorean_configuration_gives_an_exact_pose() {
         [rational(3, 13), rational(-4, 5), rational(-36, 65)],
         [rational(-12, 13), R::zero(), rational(-5, 13)],
     ];
-    for i in 0..3 {
-        for j in 0..3 {
-            assert_eq!(pose.r.at(i, j), expected[i][j], "rotation entry ({i}, {j})");
+    for (i, row) in expected.iter().enumerate() {
+        for (j, want) in row.iter().enumerate() {
+            assert_eq!(pose.r.at(i, j), *want, "rotation entry ({i}, {j})");
         }
     }
 }
 
 /// An exact rational from a small integer pair.
 fn rational(numerator: i128, denominator: i128) -> R {
-    R::from_parts(numerator, denominator)
+    R::new(numerator, denominator)
 }
 
 /// The wrist centre is a polynomial in the pose alone, so it is exact whenever the pose
@@ -125,11 +128,11 @@ fn rational(numerator: i128, denominator: i128) -> R {
 fn the_wrist_centre_is_exact_and_at_the_fourth_frame() {
     let g = geometry();
     let theta = [
-        pair((4, 5), (3, 5)),
+        R::pair((4, 5), (3, 5)),
         CosSin::new(R::ONE, R::ZERO),
         CosSin::new(R::ONE, R::ZERO),
         CosSin::new(R::ONE, R::ZERO),
-        pair((5, 13), (12, 13)),
+        R::pair((5, 13), (12, 13)),
         CosSin::new(R::ONE, R::ZERO),
     ];
     let pose = fk_cs(&g, &theta);
@@ -143,16 +146,16 @@ fn the_wrist_centre_is_exact_and_at_the_fourth_frame() {
 fn the_rotation_factors_through_frame_three_exactly() {
     let g = geometry();
     let theta = [
-        pair((4, 5), (3, 5)),
-        pair((12, 13), (5, 13)),
+        R::pair((4, 5), (3, 5)),
+        R::pair((12, 13), (5, 13)),
         CosSin::new(R::ONE, R::ZERO),
         CosSin::new(R::ONE, R::ZERO),
-        pair((5, 13), (12, 13)),
-        pair((15, 17), (8, 17)),
+        R::pair((5, 13), (12, 13)),
+        R::pair((15, 17), (8, 17)),
     ];
     let pose = fk_cs(&g, &theta);
     let factored = robot_kinematics::arm_rotation_cs(theta[0], theta[1], theta[2])
-        .mul(robot_kinematics::wrist_rotation_cs(theta[3], theta[4], theta[5]));
+        * robot_kinematics::wrist_rotation_cs(theta[3], theta[4], theta[5]);
     assert_eq!(pose.r, factored);
 }
 
@@ -164,7 +167,7 @@ fn the_chain_reads_only_the_pairs() {
     let g = geometry();
     let identity_pair = CosSin::new(R::ONE, R::ZERO);
     let theta = [
-        pair((4, 5), (3, 5)),
+        R::pair((4, 5), (3, 5)),
         identity_pair,
         identity_pair,
         identity_pair,
@@ -174,7 +177,7 @@ fn the_chain_reads_only_the_pairs() {
     // Replacing a pair by the same pair built a different way changes nothing: the pair
     // *is* the input, and there is no angle to normalise.
     let rebuilt = [
-        CosSin::new(R::from_parts(4, 5), R::from_parts(3, 5)),
+        CosSin::new(R::new(4, 5), R::new(3, 5)),
         identity_pair,
         identity_pair,
         identity_pair,
@@ -190,7 +193,7 @@ fn the_chain_reads_only_the_pairs() {
 fn the_homogeneous_matrix_is_exact() {
     let g = geometry();
     let theta = [
-        pair((4, 5), (3, 5)),
+        R::pair((4, 5), (3, 5)),
         CosSin::new(R::ONE, R::ZERO),
         CosSin::new(R::ONE, R::ZERO),
         CosSin::new(R::ONE, R::ZERO),
@@ -222,5 +225,5 @@ fn the_rotation_check_lives_on_the_transcendental_side() {
     let g = geometry();
     let identity_pair = CosSin::new(R::ONE, R::ZERO);
     let pose: Pose<R> = fk_cs(&g, &[identity_pair; 6]);
-    assert_eq!(pose.r.transpose().mul(pose.r), Mat3::<R>::identity());
+    assert_eq!(pose.r.transpose() * pose.r, Mat3::<R>::identity());
 }

@@ -1,26 +1,23 @@
-//! Shared test support.
+//! An exact rational implementing the kinematics' [`Field`] trait.
 //!
-//! The one thing here is [`Ratio`]: an exact rational that implements the crate's
-//! [`Field`] trait, so the polynomial half of the kinematics can be evaluated over `ℚ`
-//! and compared against the Lean generator's vectors with `==` instead of a tolerance.
+//! This is what lets the golden vectors be checked with `==` rather than a tolerance:
+//! the polynomial half of the mathematics — the forward chain, the wrench algebra, the
+//! dynamics — is exact over `ℚ`, so a disagreement is a real disagreement and not
+//! floating-point drift.
 //!
-//! It lives in the test tree rather than in the crate so that `robot-kinematics` keeps
-//! the zero-dependency property `kinematics.py` has. `Field` is deliberately unsealed
-//! for exactly this reason.
-//!
-//! It is a fixed-width rational over `i128`, not a big-integer one, because `Field`
-//! requires `Copy` and a heap-allocated rational is not. That is enough for the golden
+//! It is fixed-width over `i128` rather than a big-integer rational because [`Field`]
+//! requires `Copy`, and a heap-allocated rational is not. That is ample for these
 //! vectors: their denominators are products of the small Pythagorean ones (`5`, `13`,
-//! `17`) over a six-joint chain, which stays far inside `i128`'s range. An overflow
-//! panics, and would mean the generated vectors are larger than the design anticipated.
+//! `17`) over a six-joint chain, which stays far inside `i128`. An overflow panics, and
+//! would mean a generated vector is larger than the design anticipated.
 
-#![allow(dead_code)]
-
-use robot_kinematics::Field;
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use core::cmp::Ordering;
+use core::fmt::{self, Debug};
+use core::ops::{Add, Div, Mul, Neg, Sub};
+use robot_kinematics::{CosSin, Field};
 
 /// An exact rational, normalised to lowest terms with a positive denominator.
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Ratio {
     numerator: i128,
     denominator: i128,
@@ -39,7 +36,7 @@ impl Ratio {
     /// Build from a numerator and denominator, reducing and normalising the sign.
     ///
     /// # Panics
-    /// If the denominator is zero, or if reducing overflows `i128`.
+    /// If the denominator is zero.
     pub fn new(numerator: i128, denominator: i128) -> Self {
         assert!(denominator != 0, "rational with zero denominator");
         let sign = if denominator < 0 { -1 } else { 1 };
@@ -60,12 +57,6 @@ impl Ratio {
         }
     }
 
-    /// A rational from a small integer pair without reduction, for the generated
-    /// vectors, whose values are already in lowest terms.
-    pub fn from_parts(numerator: i128, denominator: i128) -> Self {
-        Self::new(numerator, denominator)
-    }
-
     pub fn numerator(self) -> i128 {
         self.numerator
     }
@@ -74,14 +65,25 @@ impl Ratio {
         self.denominator
     }
 
-    /// Whether the value is zero.
     pub fn is_zero(self) -> bool {
         self.numerator == 0
     }
 
-    /// The value as an `f64`, for reporting a disagreement in a test failure.
+    /// The value as an `f64`, for reporting a disagreement in a failure message.
     pub fn to_f64(self) -> f64 {
         self.numerator as f64 / self.denominator as f64
+    }
+}
+
+impl Debug for Ratio {
+    /// Prints as `n/d`, or as a bare integer when the denominator is one, so a failing
+    /// assertion reads the way the JSON does.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.denominator == 1 {
+            write!(f, "{}", self.numerator)
+        } else {
+            write!(f, "{}/{}", self.numerator, self.denominator)
+        }
     }
 }
 
@@ -96,10 +98,15 @@ impl Field for Ratio {
         Self::ONE
     }
 
-    /// Exact conversion: the binary expansion of an `f64` is a rational with a power of
-    /// two for a denominator, so this introduces no rounding at all.
+    /// Exact conversion. The binary expansion of an `f64` is a rational whose
+    /// denominator is a power of two, so this introduces no rounding at all — which
+    /// matters because the structural constants (`2` in the law of cosines, `180` in
+    /// the degree conversion) must not perturb an otherwise exact computation.
     fn from_f64(value: f64) -> Self {
-        assert!(value.is_finite(), "cannot convert a non-finite value exactly");
+        assert!(
+            value.is_finite(),
+            "cannot convert {value} to an exact rational"
+        );
         if value == 0.0 {
             return Self::ZERO;
         }
@@ -107,8 +114,8 @@ impl Field for Ratio {
         let negative = bits >> 63 == 1;
         let raw_exponent = ((bits >> 52) & 0x7ff) as i64;
         let mantissa = (bits & 0x000f_ffff_ffff_ffff) as i128;
-        // Subnormal values have no implicit leading one; the vectors never contain any,
-        // but the branch keeps the conversion honest.
+        // Subnormals carry no implicit leading one. The generated vectors never contain
+        // any, but the branch keeps the conversion total.
         let (mantissa, exponent) = if raw_exponent == 0 {
             (mantissa, -1074i64)
         } else {
@@ -141,10 +148,8 @@ impl Field for Ratio {
 }
 
 impl PartialOrd for Ratio {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(
-            (self.numerator * other.denominator).cmp(&(other.numerator * self.denominator)),
-        )
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some((self.numerator * other.denominator).cmp(&(other.numerator * self.denominator)))
     }
 }
 
@@ -205,6 +210,16 @@ impl From<i128> for Ratio {
     }
 }
 
+impl Ratio {
+    /// An exact cosine/sine pair from a small integer pair.
+    ///
+    /// The vectors use Pythagorean pairs — `(4/5, 3/5)`, `(5/13, 12/13)`, `(15/17, 8/17)`
+    /// — so the pair is exact without any trigonometry being involved.
+    pub fn pair(cos: (i128, i128), sin: (i128, i128)) -> CosSin<Self> {
+        CosSin::new(Self::new(cos.0, cos.1), Self::new(sin.0, sin.1))
+    }
+}
+
 fn gcd(a: i128, b: i128) -> i128 {
     let (mut a, mut b) = (a.abs(), b.abs());
     while b != 0 {
@@ -213,20 +228,6 @@ fn gcd(a: i128, b: i128) -> i128 {
         b = t;
     }
     if a == 0 { 1 } else { a }
-}
-
-/// The cosine and sine of a quarter turn, exactly.
-pub fn quarter_turn() -> robot_kinematics::CosSin<Ratio> {
-    robot_kinematics::CosSin::new(Ratio::ZERO, Ratio::ONE)
-}
-
-/// An exact cosine/sine pair from small integers. The pairs are Pythagorean — `(3, 4)`
-/// for a `3-4-5` triangle — so the pair is exact without any trigonometry.
-pub fn pair(cos: (i128, i128), sin: (i128, i128)) -> robot_kinematics::CosSin<Ratio> {
-    robot_kinematics::CosSin::new(
-        Ratio::from_parts(cos.0, cos.1),
-        Ratio::from_parts(sin.0, sin.1),
-    )
 }
 
 #[cfg(test)]
@@ -238,13 +239,33 @@ mod tests {
         assert_eq!(Ratio::new(2, 4), Ratio::new(1, 2));
         assert_eq!(Ratio::new(1, -2), Ratio::new(-1, 2));
         assert_eq!(Ratio::new(1, -2).denominator(), 2);
+        assert_eq!(Ratio::new(0, -7), Ratio::ZERO);
     }
 
     #[test]
-    fn from_f64_is_exact_for_halves_and_integers() {
+    fn from_f64_is_exact() {
         assert_eq!(Ratio::from_f64(2.0), Ratio::integer(2));
         assert_eq!(Ratio::from_f64(0.5), Ratio::new(1, 2));
         assert_eq!(Ratio::from_f64(-0.25), Ratio::new(-1, 4));
         assert_eq!(Ratio::from_f64(180.0), Ratio::integer(180));
+        // 0.1 has no finite decimal expansion in binary; the conversion is still exact
+        // with respect to the f64, which is the point.
+        assert_eq!(
+            Ratio::from_f64(0.1),
+            Ratio::new(3602879701896397, 36028797018963968)
+        );
+    }
+
+    #[test]
+    fn ordering_compares_across_denominators() {
+        assert!(Ratio::new(1, 3) < Ratio::new(1, 2));
+        assert!(Ratio::new(-1, 2) < Ratio::new(-1, 3));
+        assert!(Ratio::new(2, 4) == Ratio::new(1, 2));
+    }
+
+    #[test]
+    fn debug_prints_the_json_spelling() {
+        assert_eq!(std::format!("{:?}", Ratio::integer(3)), "3");
+        assert_eq!(std::format!("{:?}", Ratio::new(-3, 5)), "-3/5");
     }
 }

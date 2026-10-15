@@ -86,23 +86,6 @@ impl<S: Field> Mat3<S> {
         ])
     }
 
-    #[inline]
-    pub fn mul(self, other: Self) -> Self {
-        let mut out = Self::zero();
-        for i in 0..3 {
-            for j in 0..3 {
-                out.set(
-                    i,
-                    j,
-                    self.at(i, 0) * other.at(0, j)
-                        + self.at(i, 1) * other.at(1, j)
-                        + self.at(i, 2) * other.at(2, j),
-                );
-            }
-        }
-        out
-    }
-
     /// The matrix-vector product, Lean's `M *ᵥ v`.
     #[inline]
     pub fn mul_vec(self, v: Vec3<S>) -> Vec3<S> {
@@ -217,9 +200,24 @@ impl<S: Scalar> Mat3<S> {
 
 impl<S: Field> Mul for Mat3<S> {
     type Output = Self;
+
+    /// The matrix product. `Mul` is in the prelude, so `a.mul(b)` and `a * b` are the
+    /// same call and there is no second definition to keep in step.
     #[inline]
     fn mul(self, other: Self) -> Self {
-        Mat3::mul(self, other)
+        let mut out = Self::zero();
+        for i in 0..3 {
+            for j in 0..3 {
+                out.set(
+                    i,
+                    j,
+                    self.at(i, 0) * other.at(0, j)
+                        + self.at(i, 1) * other.at(1, j)
+                        + self.at(i, 2) * other.at(2, j),
+                );
+            }
+        }
+        out
     }
 }
 
@@ -230,7 +228,7 @@ mod tests {
     #[test]
     fn rot_z_is_orthogonal_with_unit_determinant() {
         let r = Mat3::rot_z(0.7);
-        let identity = r.transpose().mul(r);
+        let identity = r.transpose() * r;
         assert!(identity.frobenius_distance(Mat3::<f64>::identity()) < 1e-15);
         assert!((r.det() - 1.0).abs() < 1e-15);
     }

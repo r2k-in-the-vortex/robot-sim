@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/robot-kinematics"]
+members = ["crates/robot-kinematics", "crates/robot-golden"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ repository = "https://github.com/r2k-in-the-vortex/robot-sim"
 
 [workspace.dependencies]
 robot-kinematics = { path = "crates/robot-kinematics", default-features = false }
+robot-golden = { path = "crates/robot-golden" }
 
 [profile.release]
 # The kinematics core is destined for a real-time control loop; keep it fast and

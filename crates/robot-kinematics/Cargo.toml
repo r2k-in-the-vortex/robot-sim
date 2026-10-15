@@ -22,3 +22,6 @@ libm = { version = "0.2", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[dev-dependencies]
+robot-golden.workspace = true

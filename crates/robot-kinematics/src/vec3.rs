@@ -54,31 +54,8 @@ impl<S: Field> Vec3<S> {
     }
 
     #[inline]
-    pub fn add(self, other: Self) -> Self {
-        Self::new(
-            self.x() + other.x(),
-            self.y() + other.y(),
-            self.z() + other.z(),
-        )
-    }
-
-    #[inline]
-    pub fn sub(self, other: Self) -> Self {
-        Self::new(
-            self.x() - other.x(),
-            self.y() - other.y(),
-            self.z() - other.z(),
-        )
-    }
-
-    #[inline]
     pub fn scale(self, factor: S) -> Self {
         Self::new(self.x() * factor, self.y() * factor, self.z() * factor)
-    }
-
-    #[inline]
-    pub fn neg(self) -> Self {
-        Self::new(-self.x(), -self.y(), -self.z())
     }
 
     /// The dot product, Lean's `dotProduct`.
@@ -143,7 +120,7 @@ impl<S: Scalar> Vec3<S> {
     /// The Euclidean distance to another point.
     #[inline]
     pub fn distance(self, other: Self) -> S {
-        self.sub(other).norm()
+        (self - other).norm()
     }
 }
 
@@ -163,7 +140,11 @@ impl<S: Field> Add for Vec3<S> {
     type Output = Self;
     #[inline]
     fn add(self, other: Self) -> Self {
-        Vec3::add(self, other)
+        Self::new(
+            self.x() + other.x(),
+            self.y() + other.y(),
+            self.z() + other.z(),
+        )
     }
 }
 
@@ -171,7 +152,11 @@ impl<S: Field> Sub for Vec3<S> {
     type Output = Self;
     #[inline]
     fn sub(self, other: Self) -> Self {
-        Vec3::sub(self, other)
+        Self::new(
+            self.x() - other.x(),
+            self.y() - other.y(),
+            self.z() - other.z(),
+        )
     }
 }
 
@@ -179,7 +164,7 @@ impl<S: Field> Neg for Vec3<S> {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        Vec3::neg(self)
+        Self::new(-self.x(), -self.y(), -self.z())
     }
 }
 
@@ -210,7 +195,7 @@ mod tests {
     fn cross_is_antisymmetric() {
         let a = v(1.0, 2.0, 3.0);
         let b = v(-4.0, 5.0, 0.5);
-        assert_eq!(a.cross(b), b.cross(a).neg());
+        assert_eq!(a.cross(b), -b.cross(a));
     }
 
     #[test]

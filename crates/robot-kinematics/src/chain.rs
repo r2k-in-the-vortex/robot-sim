@@ -52,7 +52,7 @@ fn joint_transforms_cs<S: Field>(
 #[inline]
 pub fn arm_pose_cs<S: Field>(g: &Geometry<S>, theta: &AnglesCosSin<S>) -> Pose<S> {
     let joint = joint_transforms_cs(g, theta);
-    joint[0].mul(joint[1]).mul(joint[2])
+    joint[0] * joint[1] * joint[2]
 }
 
 /// Frames 3 to 6: the spherical wrist, whose three axes meet at the frame-4 origin.
@@ -60,7 +60,7 @@ pub fn arm_pose_cs<S: Field>(g: &Geometry<S>, theta: &AnglesCosSin<S>) -> Pose<S
 #[inline]
 pub fn wrist_pose_cs<S: Field>(g: &Geometry<S>, theta: &AnglesCosSin<S>) -> Pose<S> {
     let joint = joint_transforms_cs(g, theta);
-    joint[3].mul(joint[4]).mul(joint[5])
+    joint[3] * joint[4] * joint[5]
 }
 
 /// The full forward kinematics, `A1 · A2 · ⋯ · A6`. Lean's `fk`.
@@ -71,7 +71,7 @@ pub fn wrist_pose_cs<S: Field>(g: &Geometry<S>, theta: &AnglesCosSin<S>) -> Pose
 /// and `carrier_pose` gives the left-nested tower the renderer draws.
 #[inline]
 pub fn fk_cs<S: Field>(g: &Geometry<S>, theta: &AnglesCosSin<S>) -> Pose<S> {
-    arm_pose_cs(g, theta).mul(wrist_pose_cs(g, theta))
+    arm_pose_cs(g, theta) * wrist_pose_cs(g, theta)
 }
 
 /// The cumulative frame tower `⁰T_0 … ⁰T_6`, the array `forward_kinematics` returns and
@@ -85,18 +85,18 @@ pub fn carrier_pose_cs<S: Field>(
     theta: &AnglesCosSin<S>,
 ) -> [Pose<S>; FRAME_COUNT] {
     let j = joint_transforms_cs(g, theta);
-    let arm = j[0].mul(j[1]).mul(j[2]);
+    let arm = j[0] * j[1] * j[2];
     // Built left to right through frame 3, matching Lean's literal vector: the arm's
     // three joints are bracketed as `armPose` and every later frame extends it by one
     // transform, which is the recurrence `carrierPose_succ` records.
     let t3 = arm;
-    let t4 = t3.mul(j[3]);
-    let t5 = t4.mul(j[4]);
-    let t6 = t5.mul(j[5]);
+    let t4 = t3 * j[3];
+    let t5 = t4 * j[4];
+    let t6 = t5 * j[5];
     [
         Pose::identity(),
         j[0],
-        j[0].mul(j[1]),
+        j[0] * j[1],
         t3,
         t4,
         t5,
@@ -154,10 +154,10 @@ pub fn arm_rotation_cs<S: Field>(
     theta3: CosSin<S>,
 ) -> Mat3<S> {
     let quarter = CosSin::<S>::quarter_turn();
-    Mat3::rot_z_cs(theta1)
-        .mul(Mat3::rot_x_cs(quarter))
-        .mul(Mat3::rot_z_cs(theta2.then(theta3)))
-        .mul(Mat3::rot_x_cs(quarter))
+    // Left-associated, as Lean writes it; the product is associative in the
+    // mathematics and the bracketing only fixes the floating-point rounding.
+    Mat3::rot_z_cs(theta1) * Mat3::rot_x_cs(quarter) * Mat3::rot_z_cs(theta2.then(theta3))
+        * Mat3::rot_x_cs(quarter)
 }
 
 /// The rotation from frame 3 to frame 6: a ZYZ decomposition, because joints 4, 5 and 6
@@ -168,9 +168,7 @@ pub fn arm_rotation_cs<S: Field>(
 /// joint, and it is the reason the wrist reads as ZYZ rather than ZXZ.
 #[inline]
 pub fn wrist_rotation_cs<S: Field>(theta4: CosSin<S>, theta5: CosSin<S>, theta6: CosSin<S>) -> Mat3<S> {
-    Mat3::rot_z_cs(theta4)
-        .mul(Mat3::rot_y_cs(theta5.negated()))
-        .mul(Mat3::rot_z_cs(theta6))
+    Mat3::rot_z_cs(theta4) * Mat3::rot_y_cs(theta5.negated()) * Mat3::rot_z_cs(theta6)
 }
 
 /// The rotation from the base frame to frame 3, from angles in radians.
@@ -201,7 +199,7 @@ pub fn wrist_rotation<S: Scalar>(theta4: S, theta5: S, theta6: S) -> Mat3<S> {
 /// `target_pose[axis][2]`.
 #[inline]
 pub fn wrist_center<S: Field>(g: &Geometry<S>, target: &Pose<S>) -> Vec3<S> {
-    target.p.sub(target.z_axis().scale(g.tool_offset))
+    target.p - target.z_axis().scale(g.tool_offset)
 }
 
 /// The planar reduction of `mathematics.md` §3–§6: the wrist centre in the frame-1
@@ -336,7 +334,7 @@ mod tests {
         let g = Geometry::<f64>::shipped();
         let theta = [0.3, 1.9, -0.4, 2.2, -0.8, 1.1];
         let factored = arm_rotation(theta[0], theta[1], theta[2])
-            .mul(wrist_rotation(theta[3], theta[4], theta[5]));
+            * wrist_rotation(theta[3], theta[4], theta[5]);
         assert!(fk(&g, &theta).r.frobenius_distance(factored) < 1e-12);
     }
 

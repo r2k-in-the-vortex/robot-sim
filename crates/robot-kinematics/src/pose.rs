@@ -8,6 +8,7 @@
 
 use crate::angle::CosSin;
 use crate::mat3::Mat3;
+use core::ops::Mul;
 use crate::scalar::{Field, Scalar};
 use crate::vec3::Vec3;
 
@@ -31,16 +32,6 @@ impl<S: Field> Pose<S> {
     #[inline]
     pub fn identity() -> Self {
         Self::new(Mat3::identity(), Vec3::zero())
-    }
-
-    /// Composition: `self * other` is `self` after `other`, so `(self * other).p` places
-    /// `other`'s origin by `self`. Lean's `Pose.mul`.
-    #[inline]
-    pub fn mul(self, other: Self) -> Self {
-        Self::new(
-            self.r.mul(other.r),
-            self.r.mul_vec(other.p).add(self.p),
-        )
     }
 
     /// The 4x4 homogeneous matrix of the pose, row-major, in the layout `mathematics.md`
@@ -95,11 +86,23 @@ impl<S: Field> Pose<S> {
     #[inline]
     pub fn dh_cs(theta: CosSin<S>, d: S, a: S, alpha: CosSin<S>) -> Self {
         Self::new(
-            Mat3::rot_z_cs(theta).mul(Mat3::rot_x_cs(alpha)),
+            Mat3::rot_z_cs(theta) * Mat3::rot_x_cs(alpha),
             Self::dh_translation_cs(theta, d, a),
         )
     }
 
+}
+
+impl<S: Field> Mul for Pose<S> {
+    type Output = Self;
+
+    /// Composition: `x * y` is `x` after `y`, so `(x * y).p` places `y`'s origin by `x`.
+    /// Lean's `Pose.mul`, and the operation `toMatrix4_mul` proves corresponds to
+    /// multiplying the homogeneous matrices.
+    #[inline]
+    fn mul(self, other: Self) -> Self {
+        Self::new(self.r * other.r, self.r.mul_vec(other.p) + self.p)
+    }
 }
 
 /// The operations that need a square root, and therefore cannot be evaluated over an
@@ -113,7 +116,7 @@ impl<S: Scalar> Pose<S> {
     #[inline]
     pub fn rotation_is_a_rotation(self, tolerance: S) -> bool {
         let identity = Mat3::identity();
-        self.r.transpose().mul(self.r).frobenius_distance(identity) <= tolerance
+        (self.r.transpose() * self.r).frobenius_distance(identity) <= tolerance
             && (self.r.det() - S::one()).abs() <= tolerance
     }
 
@@ -164,7 +167,7 @@ mod tests {
     fn composition_matches_the_homogeneous_product() {
         let x = Pose::dh(0.4, 12.0, 3.0, 0.9);
         let y = Pose::dh(-1.1, 0.0, 7.0, 0.0);
-        let composed = x.mul(y).to_matrix4();
+        let composed = (x * y).to_matrix4();
         let product = mul4(x.to_matrix4(), y.to_matrix4());
         for i in 0..4 {
             for j in 0..4 {
@@ -176,8 +179,8 @@ mod tests {
     #[test]
     fn identity_is_a_two_sided_unit() {
         let x = Pose::dh(0.4, 12.0, 3.0, 0.9);
-        assert_eq!(Pose::<f64>::identity().mul(x), x);
-        assert_eq!(x.mul(Pose::identity()), x);
+        assert_eq!(Pose::<f64>::identity() * x, x);
+        assert_eq!(x * Pose::identity(), x);
     }
 
     fn mul4(a: [[f64; 4]; 4], b: [[f64; 4]; 4]) -> [[f64; 4]; 4] {
