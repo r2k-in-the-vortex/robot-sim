@@ -1,6 +1,6 @@
 name = "robot_arm"
 version = "0.1.0"
-defaultTargets = ["TorqueWrench", "Kinematics", "Dynamics"]
+defaultTargets = ["TorqueWrench", "Kinematics", "Dynamics", "Atan2", "Zyz", "InverseKinematics"]
 
 [[require]]
 name = "mathlib"
@@ -12,7 +12,7 @@ name = "TorqueWrench"
 
 # Forward kinematics of the supported arm: poses, the DH transform, the chain, the planar
 # reduction, the wrist's ZYZ entries and the angle congruence that `InverseKinematics.lean`
-# will build on. See the TODO at the end of it for the one structural fact still missing.
+# builds on.
 [[lean_lib]]
 name = "Kinematics"
 
@@ -20,6 +20,24 @@ name = "Kinematics"
 # proof library, so it is in `defaultTargets` with it.
 [[lean_lib]]
 name = "Dynamics"
+
+# The closed-form inverse solver of `kinematics.py`'s `inverse_kinematics` and the theorems
+# that it returns exactly the poses it claims to. A pure proof library, so it is in
+# `defaultTargets` with the others.
+[[lean_lib]]
+name = "InverseKinematics"
+
+# The ZYZ/wrist facts the reconstruction in `InverseKinematics` consumes: the half-turn
+# conjugation, the mirror identity that collapses the two wrist branches into one, the four
+# remaining ZYZ entries and the missing direction of orthogonality.
+[[lean_lib]]
+name = "Zyz"
+
+# `hypot`, `atan2` and `_wrap_angle` for the reals. Mathlib has no `atan2` at all, and the
+# solver is written in terms of it, so this is gap fill with no robot content of its own:
+# `atan2` is `Complex.arg`, whose convention is exactly `math.atan2`'s.
+[[lean_lib]]
+name = "Atan2"
 
 # Evaluates the transforms on the exact-rational cases and writes
 # ../test_data/force_torque_frames.json. Not in `defaultTargets`: `lake build` stays a
