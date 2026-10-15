@@ -51,3 +51,10 @@ name = "Atan2"
 [[lean_exe]]
 name = "force_torque_test_data"
 root = "ForceTorqueTestData"
+
+# Evaluates the forward chain on the exact-rational cases and writes
+# ../test_data/kinematics_frames.json. Not in `defaultTargets`, for the same reason as
+# `force_torque_test_data`: it is data, not a proof, and `lake exe` compiles it on demand.
+[[lean_exe]]
+name = "kinematics_test_data"
+root = "KinematicsTestData"

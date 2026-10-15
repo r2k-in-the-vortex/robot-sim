@@ -1,0 +1,13 @@
+[package]
+name = "robot-model"
+description = "The robot-arm configuration document: DH parameters, mesh settings and the degree/radian boundary with the kinematics core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The `std` feature is what provides the `Scalar` impl for `f64` (the workspace
+# dependency turns `default-features` off), so it is required here and in robot-app.
+robot-kinematics = { workspace = true, features = ["std"] }

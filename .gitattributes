@@ -1,0 +1,17 @@
+# Line endings.
+#
+# The Lean generators write LF, and `cargo xtask check-golden` asserts
+# `git diff --exit-code test_data/` to catch the ground truth drifting away from the
+# Lean that produced it. On a Windows checkout with `core.autocrlf` on, that file comes
+# back out with CRLF, so regenerating rewrites all 822 lines and the gate reports a
+# difference where the bytes actually agree. Pinning these to LF removes the false
+# positive; it is the one place where a line ending changes a pass into a fail.
+#
+# The rest of the tree is left to `core.autocrlf`. Normalising it as well would be
+# tidier, but it is a renormalisation commit touching every file, and nothing depends
+# on it.
+test_data/*.json text eol=lf
+
+# Lean and Python sources are read and written by toolchains that expect LF.
+*.lean text eol=lf
+*.py text eol=lf

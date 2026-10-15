@@ -1,0 +1,25 @@
+[package]
+name = "robot-app"
+description = "Bevy viewport for the six-axis robot-arm simulator: orthographic orbit camera, STL links and the DH scene graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+robot-model.workspace = true
+# `std` provides the `Scalar` impl for `f64`; the workspace dependency disables defaults.
+robot-kinematics = { workspace = true, features = ["std"] }
+
+# Pinned to an exact version, not a caret range: Bevy 0.20 shipped 2026-10-08 and its
+# satellite crates (bevy_camera, bevy_shape, bevy_extract) are new in this release, so a
+# patch bump is a real risk. bevy_egui 0.43.1 is the release that names `bevy ^0.20.0`.
+#
+# Default features rather than a hand-trimmed set: Bevy 0.20 renamed most of its feature
+# flags (`bevy_ui_picking_backend` is now `ui_picking`, and the umbrella names are newly
+# split into `*_api` / `*_bevy_render` halves), and the default set is the configuration
+# upstream actually tests.
+bevy = "=0.20.0"
+bevy_egui = "=0.43.1"
+stl_io = "=0.11.0"

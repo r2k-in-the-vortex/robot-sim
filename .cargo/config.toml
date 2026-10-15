@@ -1,0 +1,4 @@
+# Cargo has no built-in `xtask` subcommand, so this alias is what makes `cargo xtask <task>` run
+# the repository-tasks binary.
+[alias]
+xtask = "run --package xtask --"

@@ -7,7 +7,7 @@
 use crate::angle::CosSin;
 use crate::scalar::{Field, Scalar};
 use crate::vec3::Vec3;
-use core::ops::Mul;
+use core::ops::{Add, Mul, Sub};
 
 /// A 3x3 matrix in row-major order.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
@@ -111,6 +111,31 @@ impl<S: Field> Mat3<S> {
         self.at(0, 0) + self.at(1, 1) + self.at(2, 2)
     }
 
+    /// The outer product `u vᵀ`, Lean's `Matrix.vecMulVec`.
+    ///
+    /// This is the `ccᵀ` of the parallel-axis term in `Dynamics.lean`, which is why it is
+    /// worth having a name rather than being expanded inline.
+    #[inline]
+    pub fn outer(u: Vec3<S>, v: Vec3<S>) -> Self {
+        Self::from_rows([
+            [u.x() * v.x(), u.x() * v.y(), u.x() * v.z()],
+            [u.y() * v.x(), u.y() * v.y(), u.y() * v.z()],
+            [u.z() * v.x(), u.z() * v.y(), u.z() * v.z()],
+        ])
+    }
+
+    /// The scalar multiple, `c • M`.
+    #[inline]
+    pub fn scale(self, factor: S) -> Self {
+        let mut out = self;
+        for i in 0..3 {
+            for j in 0..3 {
+                out.set(i, j, self.at(i, j) * factor);
+            }
+        }
+        out
+    }
+
     #[inline]
     pub fn is_finite(self) -> bool {
         self.entries.iter().all(|entry| entry.is_finite())
@@ -195,6 +220,49 @@ impl<S: Scalar> Mat3<S> {
     #[inline]
     pub fn quarter_turn() -> S {
         S::pi() / S::from_f64(2.0)
+    }
+}
+
+impl<S: Field> Add for Mat3<S> {
+    type Output = Self;
+
+    /// Entrywise addition, Lean's `Matrix` addition. `Dynamics.lean` writes the
+    /// parallel-axis term with it: `I_c + m(⟨c,c⟩1 - ccᵀ)`.
+    #[inline]
+    fn add(self, other: Self) -> Self {
+        let mut out = self;
+        for i in 0..3 {
+            for j in 0..3 {
+                out.set(i, j, self.at(i, j) + other.at(i, j));
+            }
+        }
+        out
+    }
+}
+
+impl<S: Field> Sub for Mat3<S> {
+    type Output = Self;
+
+    /// Entrywise subtraction.
+    #[inline]
+    fn sub(self, other: Self) -> Self {
+        let mut out = self;
+        for i in 0..3 {
+            for j in 0..3 {
+                out.set(i, j, self.at(i, j) - other.at(i, j));
+            }
+        }
+        out
+    }
+}
+
+impl<S: Field> Mul<S> for Mat3<S> {
+    type Output = Self;
+
+    /// The scalar multiple, `c • M`.
+    #[inline]
+    fn mul(self, factor: S) -> Self {
+        self.scale(factor)
     }
 }
 
