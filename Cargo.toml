@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["crates/robot-kinematics"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/r2k-in-the-vortex/robot-sim"
+
+[workspace.dependencies]
+robot-kinematics = { path = "crates/robot-kinematics", default-features = false }
+
+[profile.release]
+# The kinematics core is destined for a real-time control loop; keep it fast and
+# keep the arithmetic it emits predictable.
+lto = "thin"
+codegen-units = 1

@@ -1,3 +1,5 @@
 .venv/*
 __pycache__/*
 lean/.lake/*
+/target
+.pytest_cache/
