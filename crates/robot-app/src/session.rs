@@ -387,6 +387,11 @@ impl Session {
     }
 
     /// One base-frame translation jog, `_jog_cartesian` (`simulator.py:399-406`).
+    ///
+    /// The direction is the button's whole meaning and it is applied twice: once to the
+    /// target pose and once in the status line, exactly as the reference's two lambdas each
+    /// spell out `direction * step` (`:403-404`). Dropping it from the first leaves a pair of
+    /// buttons that jog the same way while one of them reports the other.
     pub fn jog_cartesian(
         &mut self,
         axis: Axis,
@@ -407,12 +412,14 @@ impl Session {
             JOG_STEP_ERROR,
             document,
             angles,
-            |pose, step| jog::offset_pose_translation(pose, axis, step),
+            |pose, step| jog::offset_pose_translation(pose, axis, f64::from(direction) * step),
             describe,
         );
     }
 
     /// One tool-frame translation jog, `_jog_tool_translation` (`simulator.py:408-415`).
+    ///
+    /// As above, the direction reaches the target pose (`:412`) and the report (`:413`).
     pub fn jog_tool_translation(
         &mut self,
         axis: Axis,
@@ -433,7 +440,7 @@ impl Session {
             JOG_STEP_ERROR,
             document,
             angles,
-            |pose, step| jog::offset_pose_tool_translation(pose, axis, step),
+            |pose, step| jog::offset_pose_tool_translation(pose, axis, f64::from(direction) * step),
             describe,
         );
     }
@@ -476,6 +483,10 @@ impl Session {
 
     /// The four rotation jogs differ only in which rotation and which verb, both of which
     /// arrive as arguments — the reference writes them out twice, once per frame.
+    ///
+    /// The signed angle is what the button means: `math.radians(direction * step)` in the
+    /// reference's two rotation lambdas (`simulator.py:420`, `:429`), the sign applied
+    /// before the conversion exactly as there, and the same signed value in the report.
     fn rotation_jog(
         &mut self,
         axis: Axis,
@@ -498,7 +509,7 @@ impl Session {
             ROTATION_STEP_ERROR,
             document,
             angles,
-            move |pose, step| rotate(pose, axis, step.to_radians()),
+            move |pose, step| rotate(pose, axis, (f64::from(direction) * step).to_radians()),
             describe,
         );
     }
@@ -768,7 +779,7 @@ pub fn default_config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use robot_kinematics::{FRAME_COUNT, carrier_pose};
+    use robot_kinematics::{FRAME_COUNT, Mat3, Vec3, carrier_pose};
     use robot_model::MESH_FRAME_NAMES;
 
     /// A session holding the shipped document, with the runtime angles at zero.
@@ -1192,6 +1203,233 @@ mod tests {
         );
     }
 
+    // --- every button jogs the way its label says -----------------------------------
+
+    /// A jog button's identity: which group's row it sits in and whether it moves the pose
+    /// or turns it. With an axis and a direction this names one of the panel's twenty-four
+    /// buttons, and the four groups are exactly the handler pairs
+    /// `ui::frame_jog_buttons` is handed for the "Base frame" and "Tool frame" groups.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum JogButton {
+        BaseTranslation,
+        BaseRotation,
+        ToolTranslation,
+        ToolRotation,
+    }
+
+    impl JogButton {
+        /// All four, in the order the two groups appear on screen.
+        const ALL: [JogButton; 4] = [
+            JogButton::BaseTranslation,
+            JogButton::BaseRotation,
+            JogButton::ToolTranslation,
+            JogButton::ToolRotation,
+        ];
+
+        /// The two that move the tool, and the two that turn it.
+        const TRANSLATIONS: [JogButton; 2] =
+            [JogButton::BaseTranslation, JogButton::ToolTranslation];
+        const ROTATIONS: [JogButton; 2] = [JogButton::BaseRotation, JogButton::ToolRotation];
+
+        /// Whether the button turns the pose rather than moving it, which is what the `R`
+        /// in its label says.
+        fn rotates(self) -> bool {
+            matches!(self, JogButton::BaseRotation | JogButton::ToolRotation)
+        }
+
+        /// Whether the button works in the axes the pose itself carries rather than the
+        /// base frame's, which is what separates the two groups.
+        fn tool_frame(self) -> bool {
+            matches!(self, JogButton::ToolTranslation | JogButton::ToolRotation)
+        }
+
+        /// The label the panel puts on this button, from the panel's own spelling of it.
+        fn label(self, axis: Axis, direction: i32) -> String {
+            crate::ui::jog_button_label(axis, direction, self.rotates())
+        }
+
+        /// Click it: the handler `ui::frame_jog_buttons` is handed for this group.
+        fn press(
+            self,
+            session: &mut Session,
+            axis: Axis,
+            direction: i32,
+            document: &mut Document,
+            angles: &mut [f64; JOINT_COUNT],
+        ) {
+            match self {
+                JogButton::BaseTranslation => {
+                    session.jog_cartesian(axis, direction, document, angles);
+                }
+                JogButton::BaseRotation => {
+                    session.jog_rotation_world(axis, direction, document, angles);
+                }
+                JogButton::ToolTranslation => {
+                    session.jog_tool_translation(axis, direction, document, angles);
+                }
+                JogButton::ToolRotation => {
+                    session.jog_rotation_tool(axis, direction, document, angles);
+                }
+            }
+        }
+    }
+
+    /// The crate's own rotation about one axis, taken in degrees. `jog::axis_rotation` is
+    /// pinned against `rotX`/`rotY`/`rotZ` bit for bit, so an expectation built here shares
+    /// no line with the code a jog runs.
+    fn turn_about(axis: Axis, degrees: f64) -> Mat3<f64> {
+        let radians = degrees.to_radians();
+        match axis {
+            Axis::X => Mat3::rot_x(radians),
+            Axis::Y => Mat3::rot_y(radians),
+            Axis::Z => Mat3::rot_z(radians),
+        }
+    }
+
+    /// Every translation button moves the tool origin by the step its box holds, along the
+    /// axis its label names *and in the direction the label's sign names*: a coordinate axis
+    /// of the base frame for the base group, an axis the pose itself carries — a column of
+    /// its rotation block — for the tool group. The orientation is left alone either way.
+    ///
+    /// The expectations are built from [`Vec3`] and the rotation block rather than from
+    /// `jog`'s helpers, so this states what the label means on its own terms; the helpers
+    /// are pinned against the reference in `jog`'s own tests. The step is read out of the
+    /// session, so the shipped default is the one under test.
+    #[test]
+    fn every_translation_button_moves_the_tool_the_way_its_label_says() {
+        for button in JogButton::TRANSLATIONS {
+            for axis in Axis::ALL {
+                for direction in [-1, 1] {
+                    let label = button.label(axis, direction);
+                    let (mut session, mut document, mut angles) = session();
+                    let step = session.jog_step.parse::<f64>().expect("the shipped step");
+                    let signed_step = f64::from(direction) * step;
+                    let before = tool_pose_of(&document, &angles);
+
+                    button.press(&mut session, axis, direction, &mut document, &mut angles);
+                    let after = tool_pose_of(&document, &angles);
+
+                    let expected = if button.tool_frame() {
+                        before.r.col(axis.index()) * signed_step
+                    } else {
+                        match axis {
+                            Axis::X => Vec3::new(signed_step, 0.0, 0.0),
+                            Axis::Y => Vec3::new(0.0, signed_step, 0.0),
+                            Axis::Z => Vec3::new(0.0, 0.0, signed_step),
+                        }
+                    };
+                    assert!(
+                        (after.p - before.p).distance(expected) < 1e-9,
+                        "{label}: the tool origin moved by {:?}, not {expected:?}",
+                        after.p - before.p
+                    );
+                    assert!(
+                        after.r.frobenius_distance(before.r) < 1e-9,
+                        "{label}: a translation must not turn the tool"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every rotation button turns the tool by the angle its box holds, about the axis its
+    /// label names and towards the side its sign names — about a base axis for the base
+    /// group, which pre-multiplies the rotation, and about one of the pose's own axes for the
+    /// tool group, which post-multiplies it. The origin stays exactly where it was, which is
+    /// what makes a rotation jog a reorientation in place rather than a move.
+    #[test]
+    fn every_rotation_button_turns_the_tool_the_way_its_label_says() {
+        for button in JogButton::ROTATIONS {
+            for axis in Axis::ALL {
+                for direction in [-1, 1] {
+                    let label = button.label(axis, direction);
+                    let (mut session, mut document, mut angles) = session();
+                    let step = session
+                        .rotation_step
+                        .parse::<f64>()
+                        .expect("the shipped rotation step");
+                    let signed_turn = turn_about(axis, f64::from(direction) * step);
+                    let before = tool_pose_of(&document, &angles);
+
+                    button.press(&mut session, axis, direction, &mut document, &mut angles);
+                    let after = tool_pose_of(&document, &angles);
+
+                    let expected = if button.tool_frame() {
+                        before.r * signed_turn
+                    } else {
+                        signed_turn * before.r
+                    };
+                    assert!(
+                        after.r.frobenius_distance(expected) < 1e-9,
+                        "{label}: the orientation is not the {direction}-way turn about {axis:?}"
+                    );
+                    assert!(
+                        before.p.distance(after.p) < 1e-9,
+                        "{label}: a rotation must not translate the tool"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The two buttons of a pair have to do opposite things: each moves the arm off the pose
+    /// it started on, and the second puts it back exactly where the first found it.
+    ///
+    /// This is the shape of the bug the suite is here for — the direction reached the status
+    /// line but not the target pose, so both buttons of a pair jogged the same way while one
+    /// of them said it had gone the other way. The status line is checked too, against the
+    /// signed step the button carries rather than against the direction alone: a report that
+    /// disagrees with the move is the same lie in a different place.
+    #[test]
+    fn the_buttons_of_a_pair_jog_opposite_ways_and_undo_each_other() {
+        for button in JogButton::ALL {
+            for axis in Axis::ALL {
+                let (mut session, mut document, mut angles) = session();
+                let forward_label = button.label(axis, 1);
+                let backward_label = button.label(axis, -1);
+                let step = if button.rotates() {
+                    session.rotation_step.parse::<f64>()
+                } else {
+                    session.jog_step.parse::<f64>()
+                }
+                .expect("the shipped step");
+                let start = tool_pose_of(&document, &angles);
+
+                button.press(&mut session, axis, 1, &mut document, &mut angles);
+                let forward = tool_pose_of(&document, &angles);
+                let reported = format_plus_g(step);
+                assert!(
+                    session.status.contains(&reported),
+                    "{forward_label} reported {:?}, which is not {reported}",
+                    session.status
+                );
+                assert!(
+                    forward.p.distance(start.p) > 1e-6
+                        || forward.r.frobenius_distance(start.r) > 1e-6,
+                    "{forward_label}: the button did not move the arm at all"
+                );
+
+                button.press(&mut session, axis, -1, &mut document, &mut angles);
+                let back = tool_pose_of(&document, &angles);
+                let reported = format_plus_g(-step);
+                assert!(
+                    session.status.contains(&reported),
+                    "{backward_label} reported {:?}, which is not {reported}",
+                    session.status
+                );
+                assert!(
+                    back.p.distance(start.p) < 1e-9 && back.r.frobenius_distance(start.r) < 1e-9,
+                    "{backward_label} did not undo {forward_label}: the pose is {:?} / {:?}, \
+                     not {:?} / {:?}",
+                    back.p,
+                    back.r,
+                    start.p,
+                    start.r
+                );
+            }
+        }
+    }
+
     // --- applying -------------------------------------------------------------------
 
     #[test]
@@ -1356,8 +1594,16 @@ mod tests {
 
     /// The applied table's tool pose, through the crate's own forward kinematics.
     fn tool_position(document: &Document, angles: &[f64; JOINT_COUNT]) -> [f64; 3] {
-        let pose = carrier_pose_of(document, angles)[FRAME_COUNT - 1];
+        let pose = tool_pose_of(document, angles);
         [pose.p.x(), pose.p.y(), pose.p.z()]
+    }
+
+    /// The tool frame's whole pose, `carrier_pose`'s last entry.
+    fn tool_pose_of(
+        document: &Document,
+        angles: &[f64; JOINT_COUNT],
+    ) -> robot_kinematics::Pose<f64> {
+        carrier_pose_of(document, angles)[FRAME_COUNT - 1]
     }
 
     fn carrier_pose_of(

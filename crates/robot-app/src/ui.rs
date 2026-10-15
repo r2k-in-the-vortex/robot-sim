@@ -304,19 +304,15 @@ fn frame_jog_buttons(
     rotate: fn(&mut Session, Axis, i32, &mut Document, &mut [f64; JOINT_COUNT]),
 ) {
     ui.label(egui::RichText::new(title).strong());
-    for translating in [true, false] {
+    // The translation row first, then the rotation one, which is the reference's row order.
+    for rotating in [false, true] {
         ui.horizontal(|ui| {
             for axis in Axis::ALL {
                 for direction in [-1, 1] {
-                    let suffix = if direction < 0 { "-" } else { "+" };
-                    let label = if translating {
-                        format!("{}{suffix}", axis.letter())
-                    } else {
-                        format!("R{}{suffix}", axis.letter())
-                    };
+                    let label = jog_button_label(axis, direction, rotating);
                     if ui.small_button(label).clicked() {
-                        if translating {
-                            translate(
+                        if rotating {
+                            rotate(
                                 session,
                                 axis,
                                 direction,
@@ -324,7 +320,7 @@ fn frame_jog_buttons(
                                 &mut robot.runtime_angles_deg,
                             );
                         } else {
-                            rotate(
+                            translate(
                                 session,
                                 axis,
                                 direction,
@@ -336,6 +332,25 @@ fn frame_jog_buttons(
                 }
             }
         });
+    }
+}
+
+/// One jog button's label: the axis letter, an `R` when the button turns the pose rather
+/// than moving it, and the sign of the direction it carries — `X-`, `X+`, `RX-`, `RX+`.
+///
+/// The label and the direction the click hands to the handler are both built from the one
+/// `direction` argument, so the sign a button advertises and the sign it jogs with cannot
+/// drift apart. The reference writes the same two spellings out of its `((-1, "-"), (1, "+"))`
+/// pairs (`simulator.py:280-296`).
+///
+/// `pub(crate)` for `session`'s tests, which name the buttons they click the way the panel
+/// spells them rather than paraphrasing the suffix.
+pub(crate) fn jog_button_label(axis: Axis, direction: i32, rotating: bool) -> String {
+    let suffix = if direction < 0 { "-" } else { "+" };
+    if rotating {
+        format!("R{}{suffix}", axis.letter())
+    } else {
+        format!("{}{suffix}", axis.letter())
     }
 }
 
@@ -859,5 +874,30 @@ mod tests {
             (screen.x - (tall.center().x + 200.0)).abs() < 1e-3,
             "{screen:?}"
         );
+    }
+
+    /// The two button rows exactly as they read in the panel, left to right, and what each
+    /// button carries with it: the `-` spelling goes with `direction == -1` and the `+`
+    /// spelling with `1`, which is the direction the click hands the handler.
+    ///
+    /// The ways to get this wrong are a suffix taken from the other branch of the sign test,
+    /// a letter taken from the other axis, and an `R` on the row that moves the tool rather
+    /// than turning it — the panel's two nested loops put all three next to each other.
+    #[test]
+    fn a_jog_button_is_labelled_with_the_axis_and_direction_it_carries() {
+        let rows = [
+            (false, ["X-", "X+", "Y-", "Y+", "Z-", "Z+"]),
+            (true, ["RX-", "RX+", "RY-", "RY+", "RZ-", "RZ+"]),
+        ];
+        for (rotating, expected) in rows {
+            let rendered: Vec<String> = Axis::ALL
+                .iter()
+                .flat_map(|axis| {
+                    [-1, 1].map(|direction| jog_button_label(*axis, direction, rotating))
+                })
+                .collect();
+            let row = if rotating { "rotation" } else { "translation" };
+            assert_eq!(rendered, expected, "the {row} row");
+        }
     }
 }
