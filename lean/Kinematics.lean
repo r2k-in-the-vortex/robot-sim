@@ -90,8 +90,7 @@ theorem toMatrix4_mul (X Y : Pose) :
   ext i j
   fin_cases i <;> fin_cases j <;>
     simp [toMatrix4, Matrix.mul_apply, mulVec, dotProduct, Fin.sum_univ_four,
-      Fin.sum_univ_three] <;>
-    ring
+      Fin.sum_univ_three]
 
 @[ext] theorem ext {X Y : Pose} (hR : X.R = Y.R) (hp : X.p = Y.p) : X = Y := by
   cases X; cases Y; simp_all
@@ -103,11 +102,11 @@ theorem mul_assoc (X Y Z : Pose) : X * Y * Z = X * (Y * Z) := by
 
 theorem one_mul (X : Pose) : 1 * X = X := by
   ext <;> simp only [mul_R, mul_p, one_R, one_p, Pi.add_apply, Pi.zero_apply,
-    Matrix.one_mul, Matrix.one_mulVec] <;> abel
+    Matrix.one_mul, Matrix.one_mulVec]; abel
 
 theorem mul_one (X : Pose) : X * 1 = X := by
   ext <;> simp only [mul_R, mul_p, one_R, one_p, Pi.add_apply, Pi.zero_apply,
-    Matrix.mul_one, Matrix.mulVec_zero] <;> abel
+    Matrix.mul_one, Matrix.mulVec_zero]; abel
 
 end Pose
 
@@ -237,8 +236,7 @@ theorem dh_toMatrix4 (θ d a α : ℝ) :
          0, 0, 0, 1] := by
   ext i j
   fin_cases i <;> fin_cases j <;>
-    simp [dh, dhP, Pose.toMatrix4, rotZ, rotX, Matrix.mul_apply, Fin.sum_univ_three] <;>
-    ring
+    simp [dh, dhP, Pose.toMatrix4, rotZ, rotX]
 
 variable (g : Geometry) (θ : Fin 6 → ℝ)
 
@@ -299,8 +297,7 @@ theorem wristPose_R : (wristPose g θ).R = wristRotation (θ 3) (θ 4) (θ 5) :=
   ext i j
   fin_cases i <;> fin_cases j <;>
     simp [wristPose, wristRotation, joint, dh, Pose.mul_R, rotZ, rotX, rotY,
-      Matrix.mul_apply, Fin.sum_univ_three, Real.cos_neg, Real.sin_neg] <;>
-    ring
+      Matrix.mul_apply, Fin.sum_univ_three, Real.cos_neg, Real.sin_neg]
 
 /-- `R_0^6` factors through frame 3, which is what lets the wrist be solved from the `R_3^6`
 the solver builds out of the target pose. -/
@@ -523,12 +520,12 @@ theorem wristCenter_fk : wristCenter g (fk g θ) =
 
 theorem planarQ_eq : planarQ g θ =
     planarU g θ * Real.cos (θ 1) - planarV g θ * Real.sin (θ 1) := by
-  simp only [planarQ, planarU, planarV, psi, Real.cos_add, Real.sin_add]
+  simp only [planarQ, planarU, planarV, psi, Real.cos_add]
   ring
 
 theorem planarH_eq : planarH g θ =
     planarU g θ * Real.sin (θ 1) + planarV g θ * Real.cos (θ 1) := by
-  simp only [planarH, planarU, planarV, psi, Real.cos_add, Real.sin_add]
+  simp only [planarH, planarU, planarV, psi, Real.sin_add]
   ring
 
 /-- The planar distance from the frame-1 origin to the wrist centre is the length of
