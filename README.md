@@ -97,3 +97,20 @@ readouts.
 1) for Force torque control to be possible, 6DOF force sensor readings must be recalculated from one frame of reference to another. For example from sensor frame to tooltip frame where the contact point actually is.
 
 2) to validate the mathematics of the force/torque control, before implementing it in code, the mathematics should be proved in lean/TorqueWrench.lean
+
+The frame transforms alone are not enough for a real robot: the sensor measures the wrench
+*transmitted through it*, which also contains the gravitational and inertial wrench of the tool
+and payload. Those are modelled in `lean/Dynamics.lean`, which proves that gravity/inertia
+compensation recovers the contact wrench exactly (`recoveredContactWrench_measuredWrench`), that
+the model does not depend on which frame it is evaluated in (`inertialWrench_transport`,
+`gravityWrench_transport`), and that rigidly attached bodies combine into one
+(`inertialWrench_add`). The derivation, with the sign conventions, is in the
+"Force/torque sensor dynamics" section of `mathematics.md`.
+
+The generated ground truth in `test_data/force_torque_frames.json` covers the dynamics too
+(schema 3, the `dynamics_cases` section), and `test_force_torque.py` re-derives every number in
+it from the case inputs in exact rational arithmetic. Regenerate with, from `lean/`:
+
+```powershell
+lake exe force_torque_test_data
+```

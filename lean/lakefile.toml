@@ -1,6 +1,6 @@
 name = "robot_arm"
 version = "0.1.0"
-defaultTargets = ["TorqueWrench"]
+defaultTargets = ["TorqueWrench", "Dynamics"]
 
 [[require]]
 name = "mathlib"
@@ -9,6 +9,11 @@ rev = "v4.35.0"
 
 [[lean_lib]]
 name = "TorqueWrench"
+
+# Inertia, gravity and the sensor measurement model, built on `TorqueWrench`; still a pure
+# proof library, so it is in `defaultTargets` with it.
+[[lean_lib]]
+name = "Dynamics"
 
 # Evaluates the transforms on the exact-rational cases and writes
 # ../test_data/force_torque_frames.json. Not in `defaultTargets`: `lake build` stays a
