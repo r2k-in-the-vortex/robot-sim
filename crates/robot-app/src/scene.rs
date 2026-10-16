@@ -159,6 +159,9 @@ pub fn sync_joints(robot: Res<RobotState>, mut frames: Query<(&FrameIndex, &mut 
 }
 
 /// Place each configured mesh under its frame, loading the ones whose assets changed.
+// One term per thing a slot needs to know about itself — where it sits, whether it draws,
+// and the two handles it draws through — which is one past what clippy will count.
+#[allow(clippy::type_complexity)]
 pub fn sync_meshes(
     mut commands: Commands,
     robot: Res<RobotState>,
@@ -171,6 +174,7 @@ pub fn sync_meshes(
         &mut Transform,
         &mut Visibility,
         Option<&Mesh3d>,
+        Option<&MeshMaterial3d<StandardMaterial>>,
     )>,
 ) {
     if let Some(signature) = mesh_signature(&robot.document.meshes)
@@ -182,7 +186,7 @@ pub fn sync_meshes(
         link_meshes.status = status_line(&robot.document.meshes, &errors);
     }
 
-    for (entity, slot, mut transform, mut visibility, existing) in &mut slots {
+    for (entity, slot, mut transform, mut visibility, mesh, material) in &mut slots {
         let Some(setting) = robot.document.meshes.get(slot.0) else {
             continue;
         };
@@ -190,7 +194,15 @@ pub fn sync_meshes(
         match link_meshes.get(slot.0) {
             Some(assets) => {
                 *visibility = Visibility::Visible;
-                if existing.is_none() {
+                // A row whose path or opacity changed is reloaded, and a reload hands out a
+                // fresh pair of handles. Re-point the entity at them: without this a slot
+                // keeps whatever handles it first got, so every later edit pays the STL
+                // parse of the whole table and then changes nothing on screen. Comparing
+                // first is what keeps a steady-state frame from re-inserting — and so from
+                // re-marking the components changed — on every pass.
+                let stale = mesh.is_none_or(|current| current.0 != assets.mesh)
+                    || material.is_none_or(|current| current.0 != assets.material);
+                if stale {
                     commands.entity(entity).insert((
                         Mesh3d(assets.mesh.clone()),
                         MeshMaterial3d(assets.material.clone()),
@@ -618,4 +630,90 @@ pub const fn rgb(hex: u32) -> (u8, u8, u8) {
         ((hex >> 8) & 0xff) as u8,
         (hex & 0xff) as u8,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use robot_model::{Document, JOINT_COUNT};
+
+    /// The smallest shipped STL: the test only needs a file that parses, and `_05` is a
+    /// tenth the size of its neighbours. `mesh.rs`'s own tests reach the directory the
+    /// same way, at the same relative path.
+    const STL: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../mesh/Robot c 4 a 601 s - c4-a601s_05-1.STL"
+    );
+
+    /// An app holding the mesh half of the scene and nothing more: the slot entities
+    /// `build_scene` spawns, the two asset collections `load_all` writes into, and a single
+    /// configured row.
+    fn mesh_app(opacity: f64) -> App {
+        let mut document = Document::shipped();
+        document.meshes[0].path = STL.to_owned();
+        document.meshes[0].opacity = opacity;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(RobotState {
+            document,
+            runtime_angles_deg: [0.0; JOINT_COUNT],
+        });
+        // None of these three come from `MinimalPlugins`, and the render plugins that
+        // normally add the two asset collections need a device the test has no business
+        // opening.
+        app.init_resource::<LinkMeshes>();
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<StandardMaterial>>();
+        app.add_systems(Startup, build_scene);
+        app.add_systems(Update, sync_meshes);
+        for _ in 0..3 {
+            app.update();
+        }
+        app
+    }
+
+    /// The handles the entity for `slot` actually renders through.
+    fn attached(app: &mut App, slot: usize) -> (Handle<Mesh>, Handle<StandardMaterial>) {
+        let world = app.world_mut();
+        let mut query = world.query::<(&MeshSlot, &Mesh3d, &MeshMaterial3d<StandardMaterial>)>();
+        let (_, mesh, material) = query
+            .iter(world)
+            .find(|(index, _, _)| index.0 == slot)
+            .expect("sync_meshes attaches the configured slot");
+        (mesh.0.clone(), material.0.clone())
+    }
+
+    /// Editing a row's opacity has to reach the entity, not just the asset table.
+    ///
+    /// Both halves of opacity are baked in at load time — `build_link_mesh` writes it into
+    /// every vertex color and `link_material` picks the `alpha_mode` from it — so an edited
+    /// row is a fresh pair of handles, never a mutation of the ones already in hand. A slot
+    /// that keeps the handles it first got goes on rendering the opacity it started with,
+    /// which is the one thing `simulator.py:903`'s live `set_alpha` does not do.
+    #[test]
+    fn an_opacity_edit_repoints_the_slot_at_its_rebuilt_assets() {
+        let mut app = mesh_app(1.0);
+        let (mesh, material) = attached(&mut app, 0);
+        assert_eq!(alpha_mode(&app, &material), AlphaMode::Opaque);
+
+        app.world_mut().resource_mut::<RobotState>().document.meshes[0].opacity = 0.4;
+        app.update();
+
+        let (blended_mesh, blended_material) = attached(&mut app, 0);
+        assert_ne!(mesh, blended_mesh, "the slot kept its stale mesh handle");
+        assert_ne!(
+            material, blended_material,
+            "the slot kept its stale material handle"
+        );
+        assert_eq!(alpha_mode(&app, &blended_material), AlphaMode::Blend);
+    }
+
+    fn alpha_mode(app: &App, material: &Handle<StandardMaterial>) -> AlphaMode {
+        app.world()
+            .resource::<Assets<StandardMaterial>>()
+            .get(material)
+            .expect("load_all adds the material it hands out")
+            .alpha_mode
+    }
 }
