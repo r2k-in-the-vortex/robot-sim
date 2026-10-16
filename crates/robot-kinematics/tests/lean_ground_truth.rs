@@ -349,7 +349,7 @@ fn the_corpus_covers_more_than_one_arm() {
 }
 
 /// The arm's rest pose: the simulator opens with joint 2 at its 90 degree static offset, so
-/// the configuration drawn in `doc/main_window_image.png` is the case named for it, and its
+/// the configuration drawn in `docs/main_window_image.png` is the case named for it, and its
 /// frame origins are the documented ones.
 #[test]
 fn the_documented_zero_pose_matches_the_simulator() {

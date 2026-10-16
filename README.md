@@ -16,7 +16,7 @@ control loop, and a force/torque sensor model that the Python never had. The
 reference and as a frozen regression oracle — its behaviour is the contract the Rust
 matches, and it still passes its own suite unchanged.
 
-![main window](doc/main_window_image.png)
+![main window](docs/main_window_image.png)
 
 ## Run
 
@@ -128,7 +128,7 @@ The derivation is in the *Inverse kinematics* section of
 | `crates/robot-app` | Bevy + egui desktop application |
 | `crates/robot-golden` | Exact rational arithmetic and the Lean numeral format, for tests |
 | `xtask` | `cargo xtask gen-golden` / `check-golden` |
-| `docs/verification.md` | What is proved, what is tested, and what is neither |
+| `docs/` | Verification boundaries, the Lean↔Rust map, and the Rust transition record |
 | `simulator.py` | The original Tkinter application, kept as a reference |
 | `kinematics.py` | The original DH transforms and closed-form inverse kinematics |
 | `mathematics.md` | Derivations: forward and inverse kinematics, force/torque sensor dynamics |

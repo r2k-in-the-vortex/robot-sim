@@ -4,16 +4,13 @@ This is the record of moving the simulator from Python to Rust: what was built, 
 decided, what was measured, and what is still open. It is written for whoever picks this up
 next, so it says where the bodies are buried rather than only what works.
 
-Companion documents, both in [`docs/`](../docs):
+Companion documents, both in this directory:
 
-- [`docs/verification.md`](../docs/verification.md) — what is proved, what is tested, and
-  what is neither, with the reasoning for each boundary.
-- [`docs/lean-rust-map.md`](../docs/lean-rust-map.md) — the Lean definition and theorem
-  correspondence, function by function, with a blank in the Test column meaning a gap that
-  has been noticed rather than hidden.
-
-*(The repository has both `doc/` and `docs/`. This file follows the older `doc/` because it
-sits beside the screenshot the README references. Consolidating them would be tidier.)*
+- [`verification.md`](verification.md) — what is proved, what is tested, and what is
+  neither, with the reasoning for each boundary.
+- [`lean-rust-map.md`](lean-rust-map.md) — the Lean definition and theorem correspondence,
+  function by function, with a blank in the Test column meaning a gap that has been noticed
+  rather than hidden.
 
 ## Why the port
 
@@ -310,8 +307,6 @@ and scissors the egui pass to it. And `ATTRIBUTE_COLOR` is used verbatim as line
    Python. It would be better rewritten against the Rust once someone has driven the
    interface by hand — the agent that built it could not exercise dialogs or the clipboard
    headlessly, so those two are the parts with the least evidence behind them.
-
-7. **`doc/` and `docs/` are both in use.** Consolidating would be tidier.
 
 ## If you are picking this up
 

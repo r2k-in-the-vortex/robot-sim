@@ -330,7 +330,7 @@ def cases : List Case := [
     theta := ![identity, identity, identity, identity, identity, identity] },
   -- The arm's zero pose: joint 2 carries a 90 degree static offset in
   -- `robot_parameters.json`, so the configuration the simulator opens at is not the
-  -- all-identity one. The frame origins are the ones `doc/main_window_image.png` shows.
+  -- all-identity one. The frame origins are the ones `docs/main_window_image.png` shows.
   { name := "documented_zero_pose"
     arm := shipped
     theta := ![identity, quarterTurn, identity, identity, identity, identity] },

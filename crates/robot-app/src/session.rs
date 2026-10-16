@@ -1528,7 +1528,7 @@ mod tests {
     fn the_zero_pose_copies_the_documented_tool_origin() {
         // `d1 + a2 + d4 + d6` along +x is 32 + 25 + 25 + 6 = 88 at zero angles... but the
         // arm's frames stack along z for the first three, so the shipped arm at rest reaches
-        // (41, 0, 57), the pose `doc/main_window_image.png` shows.
+        // (41, 0, 57), the pose `docs/main_window_image.png` shows.
         let document = Document::shipped();
         let text =
             Session::copy_xyz_text(&document.parameters, &[0.0; JOINT_COUNT]).expect("shipped");

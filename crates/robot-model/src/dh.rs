@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn zero_runtime_angles_reproduce_the_documented_frame_origins() {
         // The same numbers as the kinematics core's own test and as
-        // `doc/main_window_image.png`: the arm lies along +x with the tool 41 units out.
+        // `docs/main_window_image.png`: the arm lies along +x with the tool 41 units out.
         let tower = DHParameters::shipped()
             .carrier_pose(&[0.0; JOINT_COUNT])
             .expect("shipped table");

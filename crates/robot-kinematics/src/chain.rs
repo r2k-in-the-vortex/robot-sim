@@ -246,7 +246,7 @@ mod tests {
     use super::*;
     use crate::units::total_angle;
 
-    /// The shipped table's zero pose. `doc/main_window_image.png` shows the same numbers:
+    /// The shipped table's zero pose. `docs/main_window_image.png` shows the same numbers:
     /// the arm lies horizontal along +x with the tool 41 units from the base axis.
     #[test]
     fn zero_pose_matches_the_documented_frame_origins() {
