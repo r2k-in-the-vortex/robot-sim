@@ -140,15 +140,20 @@ pub fn draw_shell(
             }
         }
         Tab::Parameters => {
+            // The fill is drawn on the root, over the whole central rect, so the page stays
+            // opaque edge to edge; the content is inset from it by the margin the View tab's
+            // panels use (`Frame::side_top_panel`), so the tables do not run into the window
+            // edge and the two tabs agree about where their widgets start.
+            root.painter()
+                .rect_filled(central, 0.0, root.style().visuals.panel_fill);
+            let margin = egui::Frame::side_top_panel(root.style())
+                .inner_margin
+                .leftf();
             let mut page = root.new_child(
                 egui::UiBuilder::new()
-                    .max_rect(central)
+                    .max_rect(central.shrink2(egui::vec2(margin, 0.0)))
                     .layout(egui::Layout::top_down(egui::Align::Min)),
             );
-            // Opaque, so the 3D render behind it is covered rather than showing through:
-            // the reference swaps tabs, it does not overlay them.
-            page.painter()
-                .rect_filled(central, 0.0, page.style().visuals.panel_fill);
             page.add_space(8.0);
             parameter_page(
                 &mut page,
