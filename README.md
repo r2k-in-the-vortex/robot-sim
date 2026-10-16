@@ -6,7 +6,7 @@ an STL mesh on the base and on each joint, and moves the arm either joint by joi
 or by jogging the end effector in Cartesian space. Cartesian and rotation jogs are
 solved with a closed-form inverse kinematics derived for this arm's structure.
 
-The mathematics behind it is written out in [`mathematics.md`](mathematics.md) and
+The mathematics behind it is written out in [`mathematics.md`](docs/mathematics.md) and
 proved in Lean under [`lean/`](lean) — see [Mathematics](#mathematics) below.
 
 There are two implementations. The **Rust** one under [`crates/`](crates) is the
@@ -116,7 +116,7 @@ can still be jogged joint by joint, but a pose jog reports which parameter is
 unsupported in the status line instead of moving the robot.
 
 The derivation is in the *Inverse kinematics* section of
-[`mathematics.md`](mathematics.md).
+[`mathematics.md`](docs/mathematics.md).
 
 ## Repository layout
 
@@ -128,10 +128,9 @@ The derivation is in the *Inverse kinematics* section of
 | `crates/robot-app` | Bevy + egui desktop application |
 | `crates/robot-golden` | Exact rational arithmetic and the Lean numeral format, for tests |
 | `xtask` | `cargo xtask gen-golden` / `check-golden` |
-| `docs/` | Verification boundaries, the Lean↔Rust map, and the Rust transition record |
+| `docs/` | Derivations, verification boundaries, the Lean↔Rust map, and the Rust transition record |
 | `simulator.py` | The original Tkinter application, kept as a reference |
 | `kinematics.py` | The original DH transforms and closed-form inverse kinematics |
-| `mathematics.md` | Derivations: forward and inverse kinematics, force/torque sensor dynamics |
 | `lean/` | Lean formalisation and proofs of the same mathematics |
 | `robot_parameters.json` | Default DH and mesh configuration |
 | `mesh/` | Example STL meshes to load into the view |
@@ -141,7 +140,7 @@ The derivation is in the *Inverse kinematics* section of
 
 ## Mathematics
 
-[`mathematics.md`](mathematics.md) derives everything the simulator computes;
+[`mathematics.md`](docs/mathematics.md) derives everything the simulator computes;
 [`lean/`](lean) proves the same results formally, as pure proof libraries with no
 robot code of their own.
 
@@ -169,7 +168,7 @@ limits are deliberately out of scope — the specification covers the closed for
 and over the reals the thresholds the code uses become exact predicates.
 
 `lake build` in `lean/` builds all of it, and the derivation it follows is in
-[`mathematics.md`](mathematics.md).
+[`mathematics.md`](docs/mathematics.md).
 
 ### Force/torque control
 
@@ -186,7 +185,7 @@ contact wrench exactly (`recoveredContactWrench_measuredWrench`), that the model
 does not depend on which frame it is evaluated in (`inertialWrench_transport`,
 `gravityWrench_transport`), and that rigidly attached bodies combine into one
 (`inertialWrench_add`). The derivation, with the sign conventions, is in the
-*Force/torque sensor dynamics* section of [`mathematics.md`](mathematics.md).
+*Force/torque sensor dynamics* section of [`mathematics.md`](docs/mathematics.md).
 
 ## Tests
 
