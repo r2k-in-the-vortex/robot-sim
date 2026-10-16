@@ -137,6 +137,7 @@ The derivation is in the *Inverse kinematics* section of
 | `mesh/` | Example STL meshes to load into the view |
 | `test_data/` | Generated ground truth, produced by the Lean generators |
 | `test_kinematics.py`, `test_force_torque.py` | Python test suites |
+| `.vscode/extensions/robot-arm-validations` | The Rust, Lean and ground-truth items in VS Code's Test view |
 
 ## Mathematics
 
@@ -221,6 +222,19 @@ job also regenerates the ground truth and fails if it differs from what is
 committed — the Rust and Python suites both read the committed files and never
 regenerate them, so without that step the data could drift from the Lean that
 produced it while every suite kept passing on stale numbers.
+
+All of it is also in VS Code's Test view. The workspace extension in
+[`.vscode/extensions/robot-arm-validations`](.vscode/extensions/robot-arm-validations)
+contributes the Rust tests per package, target and test function, one item per Lean
+library in the lakefile, `check-golden`, and the fmt / clippy / `no_std` checks; the
+Python suites are there too, from the Python extension. Nothing provides a Test view for
+Rust or Lean, which is what the extension is for — install it once from *Workspace
+Recommendations* in the Extensions view. Its output parsing runs under plain Node, which
+is also how it is tested:
+
+```powershell
+node --test .vscode/extensions/robot-arm-validations/test/plan.test.js
+```
 
 ## Where the Rust deliberately differs from the Python
 

@@ -606,16 +606,61 @@ endsolid nothing
                 ) == mesh.bounds,
                 "{path:?}"
             );
-            // The shipped links are closed solids: no face may come out with a
-            // degenerate normal, and every color has to sit between the ambient floor
-            // and the full base color of its face.
-            for (corner, normal) in mesh.normals.iter().enumerate() {
-                let len = length(normal.map(f64::from));
+            // Every face with area shades as a unit normal, and every color sits between
+            // the ambient floor and the full base color of its face.
+            //
+            // A face *without* area is a collapsed CAD sliver, which the reference
+            // defines rather than forbids: all three divides in `_two_sided_face_colors`
+            // are guarded by `where=area > 0` (simulator.py:1000-1032), so a sliver keeps
+            // a zero normal, adds nothing to any neighbour's smoothing — a zero normal
+            // never clears the crease cosine — and shades at the ambient floor. It
+            // covers no pixels, so the rendered mesh is what it would be with the sliver
+            // deleted. Mesh 04 ships exactly one (face 44527, corners 133581-133583: a
+            // 0.0045-unit sliver whose third corner is the midpoint of the other two),
+            // and a re-export can add or remove more.
+            let mut slivers = 0;
+            for face in 0..declared {
+                let corners = &mesh.positions[face * 3..face * 3 + 3];
+                let a = corners[0].map(f64::from);
+                let b = corners[1].map(f64::from);
+                let c = corners[2].map(f64::from);
+                let normals = &mesh.normals[face * 3..face * 3 + 3];
+                if length(cross(sub(b, a), sub(c, a))) > 0.0 {
+                    for (offset, normal) in normals.iter().enumerate() {
+                        let len = length(normal.map(f64::from));
+                        assert!(
+                            (len - 1.0).abs() < 1e-4,
+                            "{path:?} corner {} has a non-unit normal {normal:?}",
+                            face * 3 + offset
+                        );
+                    }
+                    continue;
+                }
+                slivers += 1;
                 assert!(
-                    (len - 1.0).abs() < 1e-4,
-                    "{path:?} corner {corner} has a non-unit normal {normal:?}"
+                    normals.iter().all(|normal| *normal == [0.0; 3]),
+                    "{path:?} zero-area face {face} should shade with a zero normal, \
+                     not {normals:?}"
                 );
+                for (offset, color) in mesh.colors[face * 3..face * 3 + 3].iter().enumerate() {
+                    for (channel, channel_base) in color.iter().zip(base) {
+                        let floor = AMBIENT as f32 * channel_base;
+                        assert!(
+                            (channel - floor).abs() < 1e-6,
+                            "{path:?} corner {} of zero-area face {face} should shade at \
+                             the ambient floor {floor}, not {color:?}",
+                            face * 3 + offset
+                        );
+                    }
+                }
             }
+            // Tolerated, not ignored: one collapsed face in 57,000 is a tessellation
+            // artifact, while a mesh that is a measurable fraction slivers is an export
+            // that went wrong and its shading means nothing.
+            assert!(
+                slivers * 1000 <= declared,
+                "{path:?} is {slivers} zero-area faces out of {declared}"
+            );
             for (corner, color) in mesh.colors.iter().enumerate() {
                 for (channel, base) in color.iter().zip(base) {
                     assert!(
