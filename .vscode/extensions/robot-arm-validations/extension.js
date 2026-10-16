@@ -179,12 +179,26 @@ function resolve(item) {
 async function resolvePackages(rustItem) {
   rustItem.busy = true;
   try {
-    const { packages } = await loadMetadata();
+    let packages;
+    try {
+      ({ packages } = await loadMetadata());
+    } catch (error) {
+      // Only the metadata load is the metadata's failure. The loop below builds items, and
+      // one of *those* failing was reported as "cargo metadata failed" too -- which is how a
+      // read-only `uri` assignment in it went looking like a cargo problem.
+      rustItem.error = `cargo metadata failed: ${error.message}`;
+      return;
+    }
     if (packages.length === 0) rustItem.error = 'cargo metadata reported no packages';
     for (const pkg of packages) {
       if (discovered.has(pkg.name)) continue;
-      const item = controller.createTestItem(`rust:${pkg.name}`, pkg.name);
-      item.uri = vscode.Uri.file(pkg.dir);
+      // `uri` is read-only on a `TestItem` (`vscode.d.ts`, and the host enforces it), so it
+      // is handed to `createTestItem` rather than assigned afterwards.
+      const item = controller.createTestItem(
+        `rust:${pkg.name}`,
+        pkg.name,
+        vscode.Uri.file(pkg.dir),
+      );
       item.description = path.relative(root, pkg.dir).split(path.sep).join('/');
       item.canResolveChildren = true;
       const entry = { pkg, item, targets: new Map(), resolved: false };
@@ -249,12 +263,17 @@ function applySections(entry, sections) {
     const locations = functionLocations(entry.pkg, section.descriptor);
     const tests = new Map();
     for (const name of section.tests) {
-      const item = controller.createTestItem(`rust:${entry.pkg.name}:${key}:${name}`, name);
       // The gutter run button needs a uri and a range, and a listing gives names only. The
       // source scan below supplies both; a doctest has no `fn` to find and so no icon.
+      // `uri` is read-only and goes to `createTestItem`; `range` is not, and a position
+      // needs the uri's file to exist first, so it is set once the item is there.
       const location = locations.get(shortName(name));
+      const item = controller.createTestItem(
+        `rust:${entry.pkg.name}:${key}:${name}`,
+        name,
+        location ? vscode.Uri.file(location.path) : undefined,
+      );
       if (location) {
-        item.uri = vscode.Uri.file(location.path);
         const position = new vscode.Position(location.line - 1, location.column - 1);
         item.range = new vscode.Range(position, position);
       }

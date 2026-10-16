@@ -70,10 +70,14 @@ selecting many tests in one target runs the target instead of one command per te
 
 ## Testing it
 
-The parsing and the command lines live in `plan.js`, which imports nothing from VS Code:
+The parsing and the command lines live in `plan.js`, which imports nothing from VS Code.
+`extension.js` needs VS Code, so `test/extension.test.js` stubs the API -- strictly: a
+`TestItem`'s `id`, `uri`, `children` and `parent` are non-writable there, as they are in the
+host, because assigning one is a mistake this extension has made once already (it threw
+inside discovery and was reported as "cargo metadata failed").
 
 ```powershell
-node --test .vscode/extensions/robot-arm-validations/test/plan.test.js
+node --test ".vscode/extensions/robot-arm-validations/test/*.test.js"
 ```
 
 `test/fixtures/` holds real output from the commands concerned: a `--list` and a passing

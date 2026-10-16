@@ -230,10 +230,11 @@ library in the lakefile, `check-golden`, and the fmt / clippy / `no_std` checks;
 Python suites are there too, from the Python extension. Nothing provides a Test view for
 Rust or Lean, which is what the extension is for — install it once from *Workspace
 Recommendations* in the Extensions view. Its output parsing runs under plain Node, which
-is also how it is tested:
+is also how it is tested — the suite stubs the VS Code API the way the host behaves, so
+the items it builds are held to the same read-only properties:
 
 ```powershell
-node --test .vscode/extensions/robot-arm-validations/test/plan.test.js
+node --test ".vscode/extensions/robot-arm-validations/test/*.test.js"
 ```
 
 ## Where the Rust deliberately differs from the Python
