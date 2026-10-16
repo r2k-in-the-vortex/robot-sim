@@ -1,0 +1,15 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running unittests src\lib.rs (target\debug\deps\robot_golden-ad605af848408b92.exe)
+numeral::tests::a_json_number_is_rejected_rather_than_rounded: test
+numeral::tests::a_wrong_length_is_rejected: test
+numeral::tests::a_zero_denominator_is_rejected: test
+numeral::tests::integers_and_fractions_round_trip: test
+numeral::tests::vectors_and_matrices_read_in_row_major_order: test
+rational::tests::debug_prints_the_json_spelling: test
+rational::tests::from_f64_is_exact: test
+rational::tests::ordering_compares_across_denominators: test
+rational::tests::rationals_reduce_and_normalise_sign: test
+
+9 tests, 0 benchmarks
+   Doc-tests robot_golden
+0 tests, 0 benchmarks

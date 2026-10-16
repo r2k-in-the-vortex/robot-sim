@@ -273,8 +273,14 @@ class InverseKinematicsRoundTripTests(unittest.TestCase):
 		):
 			self.assertAlmostEqual(actual, expected, delta=1e-5)
 		achieved_rpy = _rotation_to_rpy_degrees(achieved_pose)
-		self.assertAlmostEqual(achieved_rpy[0], math.degrees(start_rpy[0]), delta=1e-4)
-		self.assertAlmostEqual(achieved_rpy[2], math.degrees(start_rpy[2]), delta=1e-4)
+		# The delta is the solver's own: `inverse_kinematics_position_preserving_roll_yaw`
+		# stops as soon as roll, yaw and position are inside `tolerance = 1e-5` radians
+		# (kinematics.py:261), so the assertion cannot ask for more than that. A `1e-4`
+		# *degree* delta is six times tighter and held only at the previous link lengths,
+		# by where the iteration happened to stop.
+		delta = math.degrees(1e-5)
+		self.assertAlmostEqual(achieved_rpy[0], math.degrees(start_rpy[0]), delta=delta)
+		self.assertAlmostEqual(achieved_rpy[2], math.degrees(start_rpy[2]), delta=delta)
 
 	def test_tk_cartesian_jog_moves_to_requested_pose(self) -> None:
 		try:

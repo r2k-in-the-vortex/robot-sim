@@ -1,8 +1,8 @@
-# CI: the Python test suite and the Lean proof build.
+# CI: the Python suite, the Lean proof build, and the Rust workspace.
 #
-# The two jobs are independent -- neither needs the other's toolchain. The Python
-# tests read the committed ``test_data/force_torque_frames.json``; the Lean job proves
-# the libraries that generate it.
+# The three jobs are independent -- none needs another's toolchain -- with one exception
+# noted below. The Python tests read the committed ``test_data``; the Rust tests do too.
+# Only the Lean job regenerates it, because Lean is what produces it.
 
 name: CI
 
@@ -11,11 +11,9 @@ on:
     branches: [main]
   pull_request:
 
-# Neither job writes anything back to the repository.
 permissions:
   contents: read
 
-# Supersede an in-flight run when a newer commit arrives on the same ref.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -47,8 +45,45 @@ jobs:
       - name: Run tests
         run: xvfb-run -a python -m unittest discover -v -p "test_*.py"
 
+  rust-tests:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Bevy links against the system audio and input libraries even when the test
+      # suite never opens a window, so the workspace does not build without them.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # The core is destined for a real-time control loop, so the configuration without
+      # the standard library has to keep building. It is a separate target because
+      # nothing else in the workspace exercises it.
+      - name: Build the no_std configuration
+        run: cargo build -p robot-kinematics --no-default-features --features libm
+
   lean-build:
-    name: Lean build
+    name: Lean build and ground truth
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -63,8 +98,30 @@ jobs:
       - uses: leanprover/lean-action@v1
         with:
           lake-package-directory: lean
-          # ``lake build`` is the whole job: these libraries are proofs, so there is
-          # no test driver to run and nothing to gate on linting.
+          # ``lake build`` is the whole proof job: these libraries are proofs, so there
+          # is no test driver to run and nothing to gate on linting.
           build: "true"
           test: "false"
           lint: "false"
+
+      # The generators are deliberately outside ``defaultTargets`` so that ``lake build``
+      # stays a pure proof build. They are compiled here instead, and the data they write
+      # is compared against what is committed.
+      #
+      # This is the only job that needs two toolchains, and it is worth the coupling:
+      # the Rust and Python suites both read the committed ``test_data`` and never
+      # regenerate it, so without this step the ground truth could drift away from the
+      # Lean that produced it and every suite would keep passing on stale numbers.
+      #
+      # ``.gitattributes`` pins ``test_data/*.json`` to LF; on a Windows checkout with
+      # autocrlf the regenerated files come back CRLF and every line differs where the
+      # bytes agree.
+      - name: Regenerate the ground truth
+        working-directory: lean
+        run: |
+          lake exe kinematics_test_data ../test_data/kinematics_frames.json
+          lake exe force_torque_test_data ../test_data/force_torque_frames.json
+          lake exe branch_decision_q ../test_data/branch_plans.json
+
+      - name: Check the ground truth has not drifted
+        run: git diff --exit-code -- test_data

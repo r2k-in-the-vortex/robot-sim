@@ -1,0 +1,29 @@
+[package]
+name = "robot-kinematics"
+description = "Denavit-Hartenberg forward kinematics and the closed-form inverse solver of the supported six-axis arm, written against the Lean specification in lean/"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+# Use the platform's maths library. Off, the crate is `no_std` and the `libm`
+# feature becomes the source of the transcendental functions.
+std = []
+# Pure-Rust transcendentals. Slower than a vectorised platform libm on some
+# targets, but reproducible across them, which matters both for a control loop
+# and for comparing against a fixed golden corpus.
+libm = ["dep:libm"]
+
+[dependencies]
+libm = { version = "0.2", optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dev-dependencies]
+proptest = "1.11.0"
+robot-golden.workspace = true
+serde_json = "1"

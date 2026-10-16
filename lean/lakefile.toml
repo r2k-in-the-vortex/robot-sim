@@ -51,3 +51,20 @@ name = "Atan2"
 [[lean_exe]]
 name = "force_torque_test_data"
 root = "ForceTorqueTestData"
+
+# Evaluates the forward chain on the exact-rational cases and writes
+# ../test_data/kinematics_frames.json. Not in `defaultTargets`, for the same reason as
+# `force_torque_test_data`: it is data, not a proof, and `lake exe` compiles it on demand.
+[[lean_exe]]
+name = "kinematics_test_data"
+root = "KinematicsTestData"
+
+# Evaluates the branch and degeneracy decisions over the rationals - the reachability band
+# compared in Q(sqrt rho) with the radical isolated and squared with sign care, the shoulder
+# anchor, the fold-back and the wrist singularity - and writes
+# ../test_data/branch_plans.json. Read-only with respect to the `R` proofs it imports, and not
+# in `defaultTargets`, for the same reason as the other two generators: it is data, not a
+# proof, and `lake exe` compiles it on demand.
+[[lean_exe]]
+name = "branch_decision_q"
+root = "BranchDecisionQ"

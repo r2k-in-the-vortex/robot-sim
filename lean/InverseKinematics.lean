@@ -1135,11 +1135,11 @@ theorem linkOne_eq_linkTwo_of_planar_eq_zero (g : Geometry) (θ : Fin 6 → ℝ)
 /-- **Non-vacuity.** The completeness theorem below is not a statement about nothing: at the
 geometry `robot_parameters.json` ships and the configuration that stands the arm straight out -
 every joint at zero or at the quarter turn - all three clauses of `NonDegenerate` hold. The planar
-radius is `10 + 40 + 40 = 90`, the planar target is `q = 80`, `h = 0`, so the second clause is not
+radius is `10 + 25 + 25 = 60`, the planar target is `q = 50`, `h = 0`, so the second clause is not
 met even though the two links are equal, and `theta4 = pi/2` is well away from the wrist
 singularity. -/
 theorem exists_nonDegenerate : ∃ (g : Geometry) (θ : Fin 6 → ℝ), NonDegenerate g θ := by
-  refine ⟨⟨10, 40, 40, 40, 10, by norm_num, by norm_num⟩, ![0, 0, quarter, 0, quarter, 0], ?_⟩
+  refine ⟨⟨10, 32, 25, 25, 6, by norm_num, by norm_num⟩, ![0, 0, quarter, 0, quarter, 0], ?_⟩
   refine ⟨?_, ?_, ?_⟩ <;> norm_num [planarQ, planarH, psi, quarter]
 
 /-! ## Completeness

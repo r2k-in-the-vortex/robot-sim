@@ -1,3 +1,9 @@
 .venv/*
 __pycache__/*
 lean/.lake/*
+/target
+# A second cargo target directory, used by the verification tasks so their build does not
+# evict the working one.
+/target-verify
+.pytest_cache/
+doc/Robot model.blend1

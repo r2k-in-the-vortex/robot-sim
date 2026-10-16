@@ -18,14 +18,14 @@
   "joints": [
     {
       "theta_offset_deg": 0.0,
-      "d": 40.0,
+      "d": 32.0,
       "a": 10.0,
       "alpha_deg": 90.0
     },
     {
       "theta_offset_deg": 90.0,
       "d": 0.0,
-      "a": 40.0,
+      "a": 25.0,
       "alpha_deg": 0.0
     },
     {
@@ -36,7 +36,7 @@
     },
     {
       "theta_offset_deg": 0.0,
-      "d": 40.0,
+      "d": 25.0,
       "a": 0.0,
       "alpha_deg": 90.0
     },
@@ -48,14 +48,14 @@
     },
     {
       "theta_offset_deg": 0.0,
-      "d": 10.0,
+      "d": 6.0,
       "a": 0.0,
       "alpha_deg": 0.0
     }
   ],
   "meshes": [
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_01-1.STL",
       "offset": [
         0.0,
         0.0,
@@ -64,91 +64,91 @@
       "rotation_deg": [
         0.0,
         0.0,
+        -90.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_02-1.STL",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        90.0,
+        0.0,
+        -90.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_03-1.STL",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        90.0,
+        -90.0,
+        180.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_04-1.STL",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        180.0,
+        0.0,
+        90.0
+      ],
+      "opacity": 1.0
+    },
+    {
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_05-1.STL",
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        90.0,
+        90.0,
         0.0
       ],
       "opacity": 1.0
     },
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_06-1.STL",
       "offset": [
         0.0,
         0.0,
         0.0
       ],
       "rotation_deg": [
+        180.0,
         0.0,
-        0.0,
-        0.0
+        90.0
       ],
       "opacity": 1.0
     },
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_07-1.STL",
       "offset": [
         0.0,
         0.0,
         0.0
       ],
       "rotation_deg": [
+        180.0,
         0.0,
-        0.0,
-        0.0
-      ],
-      "opacity": 1.0
-    },
-    {
-      "path": "",
-      "offset": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "rotation_deg": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "opacity": 1.0
-    },
-    {
-      "path": "",
-      "offset": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "rotation_deg": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "opacity": 1.0
-    },
-    {
-      "path": "",
-      "offset": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "rotation_deg": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "opacity": 1.0
-    },
-    {
-      "path": "",
-      "offset": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "rotation_deg": [
-        0.0,
-        0.0,
-        0.0
+        90.0
       ],
       "opacity": 1.0
     }

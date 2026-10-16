@@ -137,7 +137,7 @@ $$
 = {}^0\mathbf{p}_{EE} - a_6\,\mathbf{r}_1 - d_6\,\mathbf{r}_3,
 $$
 
-where $\mathbf{r}_1$ and $\mathbf{r}_3$ are the first and third columns of $R_0^6$, that is, frame 6's $X$ and $Z$ axes in base coordinates. The current robot has $a_6=0$ and $d_6=10$, so the wrist center is $P_{EE} - d_6\mathbf{r}_3$: finding it requires the desired orientation, not just the end-effector position.
+where $\mathbf{r}_1$ and $\mathbf{r}_3$ are the first and third columns of $R_0^6$, that is, frame 6's $X$ and $Z$ axes in base coordinates. The current robot has $a_6=0$ and $d_6=6$, so the wrist center is $P_{EE} - d_6\mathbf{r}_3$: finding it requires the desired orientation, not just the end-effector position.
 
 ### 2. Robot handedness and branch choices
 
@@ -174,7 +174,7 @@ signed planar radial target
 $$
 q_\sigma=\sigma r-a_1=\sigma r-10,
 \qquad
-h=z_4-d_1=z_4-40.
+h=z_4-d_1=z_4-32.
 $$
 
 Thus each J1 branch gives a different 2D target relative to J1:
@@ -182,7 +182,7 @@ Thus each J1 branch gives a different 2D target relative to J1:
 $$
 {}^1\mathbf{p}_{4,\mathrm{plane}}^{(\sigma)}
 =\begin{bmatrix}q_\sigma\\h\end{bmatrix}
-=\begin{bmatrix}\sigma\sqrt{x_4^2+y_4^2}-10\\z_4-40\end{bmatrix}.
+=\begin{bmatrix}\sigma\sqrt{x_4^2+y_4^2}-10\\z_4-32\end{bmatrix}.
 $$
 
 If $r=0$, the azimuth $\phi$ is undefined; position alone cannot determine
@@ -192,7 +192,7 @@ $\operatorname{atan2}(0,0)$.
 
 ### 4. Calculate the planar elbow angle
 
-The planar chain has link lengths $L_2=a_2=40$ and $L_4=d_4=40$. The second
+The planar chain has link lengths $L_2=a_2=25$ and $L_4=d_4=25$. The second
 link is the $d_4$ offset along the joint 4 axis, which $\alpha_3=\pi/2$ turns
 into a link perpendicular to that axis. For each J1 branch $\sigma$, use its 2D
 target $(q_\sigma,h)$ and define
