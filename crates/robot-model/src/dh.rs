@@ -52,15 +52,17 @@ impl DHParameters {
     /// The table `robot_parameters.json` ships, matching `DEFAULT_DH_VALUES` in
     /// `simulator.py` lines 30-37.
     ///
-    /// These are illustrative starter dimensions, not measurements of a specific robot.
+    /// These are the real robot's dimensions, and `Geometry::shipped` in the kinematics
+    /// core carries the same five numbers: both were adjusted to match the robot the
+    /// shipped meshes came from.
     pub const fn shipped() -> Self {
         Self::new([
-            DhRow::new(0.0, 40.0, 10.0, 90.0),
-            DhRow::new(90.0, 0.0, 40.0, 0.0),
+            DhRow::new(0.0, 32.0, 10.0, 90.0),
+            DhRow::new(90.0, 0.0, 25.0, 0.0),
             DhRow::new(0.0, 0.0, 0.0, 90.0),
-            DhRow::new(0.0, 40.0, 0.0, 90.0),
+            DhRow::new(0.0, 25.0, 0.0, 90.0),
             DhRow::new(0.0, 0.0, 0.0, -90.0),
-            DhRow::new(0.0, 10.0, 0.0, 0.0),
+            DhRow::new(0.0, 6.0, 0.0, 0.0),
         ])
     }
 
@@ -121,10 +123,10 @@ mod tests {
         let geometry = DHParameters::shipped().geometry().expect("shipped table");
         // Geometry::shipped documents exactly these five numbers.
         assert_eq!(geometry.a1, 10.0);
-        assert_eq!(geometry.d1, 40.0);
-        assert_eq!(geometry.link_one, 40.0);
-        assert_eq!(geometry.link_two, 40.0);
-        assert_eq!(geometry.tool_offset, 10.0);
+        assert_eq!(geometry.d1, 32.0);
+        assert_eq!(geometry.link_one, 25.0);
+        assert_eq!(geometry.link_two, 25.0);
+        assert_eq!(geometry.tool_offset, 6.0);
     }
 
     #[test]
@@ -142,18 +144,18 @@ mod tests {
     #[test]
     fn zero_runtime_angles_reproduce_the_documented_frame_origins() {
         // The same numbers as the kinematics core's own test and as
-        // `doc/main_window_image.png`: the arm lies along +x with the tool 60 units out.
+        // `doc/main_window_image.png`: the arm lies along +x with the tool 41 units out.
         let tower = DHParameters::shipped()
             .carrier_pose(&[0.0; JOINT_COUNT])
             .expect("shipped table");
         let expected = [
             (0.0, 0.0, 0.0),
-            (10.0, 0.0, 40.0),
-            (10.0, 0.0, 80.0),
-            (10.0, 0.0, 80.0),
-            (50.0, 0.0, 80.0),
-            (50.0, 0.0, 80.0),
-            (60.0, 0.0, 80.0),
+            (10.0, 0.0, 32.0),
+            (10.0, 0.0, 57.0),
+            (10.0, 0.0, 57.0),
+            (35.0, 0.0, 57.0),
+            (35.0, 0.0, 57.0),
+            (41.0, 0.0, 57.0),
         ];
         for (frame, (x, y, z)) in tower.iter().zip(expected) {
             assert!((frame.p.x() - x).abs() < 1e-12, "frame origin x");

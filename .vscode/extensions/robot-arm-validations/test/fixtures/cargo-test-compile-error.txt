@@ -1,0 +1,42 @@
+   Compiling fixture_crate v0.1.0 (C:\Users\rkord\AppData\Local\Temp\robot-arm-fixtures\scratch-crate)
+error[E0428]: the name `add_one` is defined multiple times
+  --> src\lib.rs:33:1
+   |
+ 9 | pub fn add_one(x: i32) -> i32 {
+   | ----------------------------- previous definition of the value `add_one` here
+...
+33 | pub fn add_one(x: i32) -> i32 {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `add_one` redefined here
+   |
+   = note: `add_one` must be defined only once in the value namespace of this module
+
+error[E0277]: cannot add `&str` to `i32`
+  --> src\lib.rs:34:7
+   |
+34 |     x + "not a number"
+   |       ^ no implementation for `i32 + &str`
+   |
+   = help: the trait `Add<&str>` is not implemented for `i32`
+help: the following other types implement trait `Add<Rhs>`
+  --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\core\src\ops\arith.rs:98:8
+   |
+   = note: `i32` implements `Add`
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\core\src\ops\arith.rs:113:0
+   |
+   = note: in this macro invocation
+  --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\core\src\internal_macros.rs:22:8
+   |
+   = note: `&i32` implements `Add<i32>`
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\core\src\internal_macros.rs:33:8
+   |
+   = note: `i32` implements `Add<&i32>`
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\core\src\internal_macros.rs:44:8
+   |
+   = note: `&i32` implements `Add`
+   = note: this error originates in the macro `add_impl` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+Some errors have detailed explanations: E0277, E0428.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `fixture_crate` (lib test) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `fixture_crate` (lib) due to 2 previous errors

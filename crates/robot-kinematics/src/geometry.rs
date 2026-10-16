@@ -77,18 +77,18 @@ impl<S: Field> Geometry<S> {
         })
     }
 
-    /// The geometry `robot_parameters.json` ships: `a1 = 10`, `d1 = 40`, `a2 = 40`,
-    /// `d4 = 40`, `d6 = 10`.
+    /// The geometry `robot_parameters.json` ships: `a1 = 10`, `d1 = 32`, `a2 = 25`,
+    /// `d4 = 25`, `d6 = 6`. The real robot's dimensions, two equal links of 25.
     ///
     /// `exists_nonDegenerate` in Lean witnesses non-vacuity at exactly these values, so
     /// they are the arm the proofs are known to have something to say about.
     pub fn shipped() -> Self {
         Self {
             a1: S::from_f64(10.0),
-            d1: S::from_f64(40.0),
-            link_one: S::from_f64(40.0),
-            link_two: S::from_f64(40.0),
-            tool_offset: S::from_f64(10.0),
+            d1: S::from_f64(32.0),
+            link_one: S::from_f64(25.0),
+            link_two: S::from_f64(25.0),
+            tool_offset: S::from_f64(6.0),
         }
     }
 
@@ -105,22 +105,22 @@ mod tests {
 
     #[test]
     fn shipped_geometry_is_accepted() {
-        assert!(Geometry::<f64>::new(10.0, 40.0, 40.0, 40.0, 10.0).is_ok());
-        assert_eq!(Geometry::<f64>::shipped().reach(), 80.0);
+        assert!(Geometry::<f64>::new(10.0, 32.0, 25.0, 25.0, 6.0).is_ok());
+        assert_eq!(Geometry::<f64>::shipped().reach(), 50.0);
     }
 
     #[test]
     fn non_positive_links_are_rejected_by_name() {
         assert_eq!(
-            Geometry::new(10.0, 40.0, 0.0, 40.0, 10.0),
+            Geometry::new(10.0, 32.0, 0.0, 25.0, 6.0),
             Err(GeometryError::LinkOneNotPositive)
         );
         assert_eq!(
-            Geometry::new(10.0, 40.0, 40.0, -1.0, 10.0),
+            Geometry::new(10.0, 32.0, 25.0, -1.0, 6.0),
             Err(GeometryError::LinkTwoNotPositive)
         );
         assert_eq!(
-            Geometry::new(f64::NAN, 40.0, 40.0, 40.0, 10.0),
+            Geometry::new(f64::NAN, 32.0, 25.0, 25.0, 6.0),
             Err(GeometryError::NotFinite)
         );
     }

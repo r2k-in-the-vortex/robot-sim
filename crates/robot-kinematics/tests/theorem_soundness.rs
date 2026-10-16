@@ -86,9 +86,9 @@ fn recovered_sine(target: &Pose<f64>, angles: &[f64; 6]) -> f64 {
 }
 
 /// A pose whose wrist centre is `(x, y, z)` and whose rotation is the identity: the identity's
-/// z axis is `(0, 0, 1)`, so the tool offset `d6` is added along it.
-fn pose_at_center(x: f64, y: f64, z: f64) -> Pose<f64> {
-    Pose::new(Mat3::identity(), Vec3::new(x, y, z + 10.0))
+/// z axis is `(0, 0, 1)`, so the geometry's tool offset `d6` is added along it.
+fn pose_at_center(g: &Geometry<f64>, x: f64, y: f64, z: f64) -> Pose<f64> {
+    Pose::new(Mat3::identity(), Vec3::new(x, y, z + g.tool_offset))
 }
 
 /// The round trip on configurations the arm can actually strike, which is `fk_of_mem_solutions`
@@ -265,14 +265,14 @@ fn degenerate_targets_are_still_sound() {
     // The fold-back: `linkOne = linkTwo` and the planar target `(0, 0)`, so `q = r - a1 = 0`
     // and `h = z - d1 = 0`. This is also the shipped geometry's *inner* band edge, since
     // `(L1 - L2)² = 0`.
-    let folded = pose_at_center(10.0, 0.0, 40.0);
-    // The outer band edge: `q = r - a1 = 80 = L1 + L2`, straight out along the arm's plane.
-    let stretched = pose_at_center(90.0, 0.0, 40.0);
+    let folded = pose_at_center(&g, 10.0, 0.0, 32.0);
+    // The outer band edge: `q = r - a1 = 50 = L1 + L2`, straight out along the arm's plane.
+    let stretched = pose_at_center(&g, 60.0, 0.0, 32.0);
     // The wrist centre on the base axis: `θ1` has no azimuth to be read off, so the solver
     // anchors the plane at zero.
-    let on_axis = pose_at_center(0.0, 0.0, 40.0);
+    let on_axis = pose_at_center(&g, 0.0, 0.0, 32.0);
     // And a target between the shoulders, where the two branches swap roles.
-    let other_side = pose_at_center(-30.0, 0.0, 70.0);
+    let other_side = pose_at_center(&g, -30.0, 0.0, 52.0);
     for (name, target) in [
         ("folded", folded),
         ("stretched", stretched),
@@ -294,7 +294,7 @@ fn degenerate_targets_are_still_sound() {
     // The inner band edge for a geometry with `L1 ≠ L2`, where it is not the fold-back:
     // `q = L2 - L1 = 30` with `h = 0` puts `q² + h²` exactly on `(L1 + L2)²`'s partner bound.
     let asymmetric = Geometry::new(10.0, 40.0, 20.0, 50.0, 10.0).expect("positive links");
-    let inner = pose_at_center(40.0, 0.0, 40.0);
+    let inner = pose_at_center(&asymmetric, 40.0, 0.0, 40.0);
     let mut out = SolutionSet::new();
     solutions(&asymmetric, &inner, &mut out);
     assert!(!out.is_empty(), "the inner edge is reachable, exactly");
@@ -311,25 +311,25 @@ fn degenerate_targets_are_still_sound() {
 #[test]
 fn the_named_targets_are_the_degenerate_ones() {
     let g = shipped();
-    let folded = pose_at_center(10.0, 0.0, 40.0);
+    let folded = pose_at_center(&g, 10.0, 0.0, 32.0);
     let plan = BranchPlan::of_pose(&g, &folded, &Tolerances::exact());
     assert!(plan.degenerate.fold_back[0], "q = 0 with L1 = L2 and h = 0");
     assert!(!plan.degenerate.fold_back[1], "sigma = -1 has q = -20");
 
-    let on_axis = pose_at_center(0.0, 0.0, 40.0);
+    let on_axis = pose_at_center(&g, 0.0, 0.0, 32.0);
     let plan = BranchPlan::of_pose(&g, &on_axis, &Tolerances::exact());
     assert!(plan.shoulder[0].radius_is_zero);
     assert!(plan.degenerate.wrist_center_on_base_axis);
 
-    let stretched = pose_at_center(90.0, 0.0, 40.0);
+    let stretched = pose_at_center(&g, 60.0, 0.0, 32.0);
     let plan = BranchPlan::of_pose(&g, &stretched, &Tolerances::exact());
     assert!(
         plan.elbow_branches[0].count() == 2,
-        "the exact band test accepts its own boundary: q = 80 = L1 + L2 exactly"
+        "the exact band test accepts its own boundary: q = 50 = L1 + L2 exactly"
     );
     assert!(
         plan.elbow_branches[1].is_empty(),
-        "and the other shoulder branch is out of reach: q = -100"
+        "and the other shoulder branch is out of reach: q = -70"
     );
 }
 
@@ -363,14 +363,17 @@ mod properties {
         /// arbitrary rotation with the wrist centre inside the reachable band. The rotation is
         /// a product of three axis rotations, so it is a rotation — the theorem's hypothesis,
         /// which `fk` would have supplied for free.
+        ///
+        /// The box is drawn around the shipped arm's reach (`L1 + L2 = 50`, `d1 = 32`), so
+        /// most of what it samples is a pose the arm can actually strike.
         #[test]
         fn soundness_on_random_poses(
             a in -3.1f64..3.1,
             b in -3.1f64..3.1,
             c in -3.1f64..3.1,
-            x in -70f64..70.0,
-            y in -70f64..70.0,
-            z in -30f64..110.0,
+            x in -60f64..60.0,
+            y in -60f64..60.0,
+            z in -20f64..90.0,
         ) {
             let g = shipped();
             let rotation = Mat3::rot_z(a) * Mat3::rot_y(b) * Mat3::rot_z(c);

@@ -247,7 +247,7 @@ mod tests {
     use crate::units::total_angle;
 
     /// The shipped table's zero pose. `doc/main_window_image.png` shows the same numbers:
-    /// the arm lies horizontal along +x with the tool 60 units from the base axis.
+    /// the arm lies horizontal along +x with the tool 41 units from the base axis.
     #[test]
     fn zero_pose_matches_the_documented_frame_origins() {
         let g = Geometry::<f64>::shipped();
@@ -257,12 +257,12 @@ mod tests {
         let tower = carrier_pose(&g, &theta);
         let expected = [
             (0.0, 0.0, 0.0),
-            (10.0, 0.0, 40.0),
-            (10.0, 0.0, 80.0),
-            (10.0, 0.0, 80.0),
-            (50.0, 0.0, 80.0),
-            (50.0, 0.0, 80.0),
-            (60.0, 0.0, 80.0),
+            (10.0, 0.0, 32.0),
+            (10.0, 0.0, 57.0),
+            (10.0, 0.0, 57.0),
+            (35.0, 0.0, 57.0),
+            (35.0, 0.0, 57.0),
+            (41.0, 0.0, 57.0),
         ];
         for (frame, (x, y, z)) in tower.iter().zip(expected) {
             assert!((frame.p.x() - x).abs() < 1e-12, "frame origin x");

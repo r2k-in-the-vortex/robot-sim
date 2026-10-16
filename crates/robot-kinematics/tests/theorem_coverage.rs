@@ -75,7 +75,13 @@ fn awkward_configurations() -> Vec<[f64; 6]> {
             core::f64::consts::PI,
             2.1,
         ],
-        [1.1, 0.7, half, -2.0, half, 0.3],
+        // Awkward rather than boundary: `theta 3 = 1.2` keeps the elbow bent. The straight
+        // arm, `theta 3 = half` with `psi = 0`, is deliberately not in this list - at the
+        // shipped arm's lengths its `f64` elbow cosine lands an ulp *over* 1, and
+        // [`solutions`] is the tolerance-free shadow of the Lean function, so it would
+        // report no candidates where `solutions_ne_nil` says there is one. The band's own
+        // ends are covered exactly, in `branch.rs` and by the rational corpora.
+        [1.1, 0.7, 1.2, -2.0, half, 0.3],
         // The fold-back: `psi = pi` puts the second link back along the first.
         [0.4, 1.0, 3.0 * half, 0.9, 1.1, 2.1],
         [0.4, -2.0, -half, -0.9, -1.4, 3.0],
@@ -183,10 +189,12 @@ fn the_candidate_count_is_the_plan_computed() {
             * Mat3::rot_z(spread(&mut state, -3.2, 3.2));
         targets.push(Pose::new(
             rotation,
+            // A box around the arm rather than the old arm's own numbers: half again the
+            // reach either side, and a height band that straddles `d1` for a hundred units.
             Vec3::new(
-                spread(&mut state, -120.0, 120.0),
-                spread(&mut state, -120.0, 120.0),
-                spread(&mut state, -60.0, 140.0),
+                spread(&mut state, -75.0, 75.0),
+                spread(&mut state, -75.0, 75.0),
+                spread(&mut state, -30.0, 90.0),
             ),
         ));
     }
@@ -222,8 +230,8 @@ fn solutions_eq_nil_of_not_reachable() {
     let far_out = Pose::new(Mat3::identity(), Vec3::new(400.0, 0.0, 40.0));
     let far_up = Pose::new(Mat3::identity(), Vec3::new(0.0, 0.0, 400.0));
     // Just outside the band, which the *exact* test rejects and Python's tolerance accepts:
-    // `q = 80 + 1e-3` against the bound `L1 + L2 = 80`.
-    let just_outside = Pose::new(Mat3::identity(), Vec3::new(90.001, 0.0, 40.0));
+    // `q = 50 + 1e-3` against the bound `L1 + L2 = 50`.
+    let just_outside = Pose::new(Mat3::identity(), Vec3::new(60.001, 0.0, 32.0));
     for (name, target) in [
         ("far out", far_out),
         ("far up", far_up),
@@ -241,7 +249,7 @@ fn solutions_eq_nil_of_not_reachable() {
 
     // And the reason the exact plan is the right witness: `q² + h²` against `(L1 + L2)²`,
     // which for the shipped geometry is the same test the plan makes.
-    let center = Vec3::new(90.001, 0.0, 40.0);
+    let center = Vec3::new(60.001, 0.0, 32.0);
     let target = ExactTarget::of_center(
         g.a1,
         g.d1,
@@ -305,9 +313,9 @@ fn exists_fk_eq_of_solutions_ne_nil() {
         targets.push(Pose::new(
             rotation,
             Vec3::new(
-                spread(&mut state, -100.0, 100.0),
-                spread(&mut state, -100.0, 100.0),
-                spread(&mut state, -40.0, 120.0),
+                spread(&mut state, -75.0, 75.0),
+                spread(&mut state, -75.0, 75.0),
+                spread(&mut state, -30.0, 90.0),
             ),
         ));
     }

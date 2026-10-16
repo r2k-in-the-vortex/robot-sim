@@ -591,16 +591,16 @@ mod tests {
     /// rotation's z axis, so a caller asking for a centre at `(x, y, z)` has to place the
     /// end effector at `(x, y, z + d6)`.
     fn pose_at_center(x: f64, y: f64, z: f64) -> Pose<f64> {
-        pose_with_center(x, y, z + 10.0)
+        pose_with_center(x, y, z + shipped().tool_offset)
     }
 
     #[test]
     fn the_fold_back_is_the_branch_whose_planar_target_vanishes() {
-        // `a1 = 10` with the wrist centre at `(10, 0, 40)`: `q_+1 = r - a1 = 0` and
+        // `a1 = 10` with the wrist centre at `(10, 0, 32)`: `q_+1 = r - a1 = 0` and
         // `h = 0`, so the `+1` branch's planar target is the frame-1 origin — the fold-back
         // clause — while the `-1` branch's is not, on the same pose. Equal links are the
         // clause's other half, so this is also the case that pins the indexing.
-        let target = ExactTarget::of_center(10.0, 40.0, 40.0, 40.0, 10.0, 0.0, 40.0);
+        let target = ExactTarget::of_center(10.0, 32.0, 25.0, 25.0, 10.0, 0.0, 32.0);
         let plan = BranchPlan::exact(&target);
         assert_eq!(plan.elbow_branches[0], ElbowBranches::BOTH);
         assert_eq!(plan.degenerate.fold_back, [true, false]);
@@ -609,20 +609,20 @@ mod tests {
     #[test]
     fn the_reachability_band_includes_its_ends() {
         // `Set.Icc (-1) 1` includes the boundary, which is `d = L1 + L2` here: the arm is
-        // straight out. `q_+1 = 0`, so `h = 80` puts the distance exactly on the bound.
-        let target = ExactTarget::of_center(10.0, 40.0, 40.0, 40.0, 10.0, 0.0, 40.0 + 80.0);
+        // straight out. `q_+1 = 0`, so `h = 50` puts the distance exactly on the bound.
+        let target = ExactTarget::of_center(10.0, 32.0, 25.0, 25.0, 10.0, 0.0, 32.0 + 50.0);
         let plan = BranchPlan::exact(&target);
         assert_eq!(plan.elbow_branches[0], ElbowBranches::BOTH);
         // A hair further out is the far side of the bound.
-        let target = ExactTarget::of_center(10.0, 40.0, 40.0, 40.0, 10.0, 0.0, 40.0 + 80.0000001);
+        let target = ExactTarget::of_center(10.0, 32.0, 25.0, 25.0, 10.0, 0.0, 32.0 + 50.0000001);
         let plan = BranchPlan::exact(&target);
         assert_eq!(plan.elbow_branches[0], ElbowBranches::NONE);
     }
 
     #[test]
     fn a_target_beyond_the_reach_is_rejected_on_both_shoulder_branches() {
-        // `h` alone takes the distance past `L1 + L2 = 80`.
-        let target = ExactTarget::of_center(10.0, 40.0, 40.0, 40.0, 0.0, 0.0, 40.0 + 100.0);
+        // `h` alone takes the distance past `L1 + L2 = 50`.
+        let target = ExactTarget::of_center(10.0, 32.0, 25.0, 25.0, 0.0, 0.0, 32.0 + 100.0);
         let plan = BranchPlan::exact(&target);
         assert_eq!(plan.elbow_branches[0], ElbowBranches::NONE);
         assert_eq!(plan.elbow_branches[1], ElbowBranches::NONE);
@@ -674,7 +674,7 @@ mod tests {
     #[test]
     fn the_wrist_centre_on_the_base_axis_is_the_first_clause() {
         // `rho = 0` on both branches; the anchor case `shoulderAngle` names.
-        let target = ExactTarget::of_center(10.0, 40.0, 40.0, 40.0, 0.0, 0.0, 40.0);
+        let target = ExactTarget::of_center(10.0, 32.0, 25.0, 25.0, 0.0, 0.0, 32.0);
         let plan = BranchPlan::exact(&target);
         assert!(plan.shoulder[0].radius_is_zero);
         assert!(plan.degenerate.wrist_center_on_base_axis);
@@ -691,8 +691,8 @@ mod tests {
         // exact too (small integers, and `hypot` of exact squares of integers stays exact
         // for these magnitudes).
         let g = shipped();
-        for x in [-160.0, -80.0, -10.0, 0.0, 10.0, 30.0, 80.0, 160.0] {
-            for z in [-40.0, 0.0, 40.0, 80.0, 120.0] {
+        for x in [-100.0, -50.0, -10.0, 0.0, 10.0, 30.0, 50.0, 100.0] {
+            for z in [-20.0, 0.0, 32.0, 57.0, 82.0] {
                 let pose = pose_at_center(x, 0.0, z);
                 let center = wrist_center(&g, &pose);
                 let exact = BranchPlan::exact(&ExactTarget::of_center(
@@ -715,9 +715,9 @@ mod tests {
         // A target just outside the band: rejected exactly, kept by `kinematics.py`'s
         // `1e-7`. The two plans differing *is* the divergence, so the test asserts both.
         let g = shipped();
-        // `q = 0`, so the distance is `|h|`; `L1 + L2 = 80`. Place the centre one ulp past
+        // `q = 0`, so the distance is `|h|`; `L1 + L2 = 50`. Place the centre one ulp past
         // the band.
-        let h = 80.0 + 1e-9;
+        let h = 50.0 + 1e-9;
         let pose = pose_at_center(10.0, 0.0, g.d1 + h);
         let exact = BranchPlan::of_pose(&g, &pose, &Tolerances::exact());
         let python = BranchPlan::of_pose(&g, &pose, &Tolerances::python());

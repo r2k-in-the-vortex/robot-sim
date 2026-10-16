@@ -25,10 +25,10 @@ fn quarter_turn() -> CosSin<R> {
 fn geometry() -> Geometry<R> {
     Geometry::new(
         R::integer(10),
-        R::integer(40),
-        R::integer(40),
-        R::integer(40),
-        R::integer(10),
+        R::integer(32),
+        R::integer(25),
+        R::integer(25),
+        R::integer(6),
     )
     .expect("the shipped geometry is a supported arm")
 }
@@ -51,12 +51,12 @@ fn the_zero_pose_is_exact_over_the_rationals() {
 
     let expected = [
         (0, 0, 0),
-        (10, 0, 40),
-        (10, 0, 80),
-        (10, 0, 80),
-        (50, 0, 80),
-        (50, 0, 80),
-        (60, 0, 80),
+        (10, 0, 32),
+        (10, 0, 57),
+        (10, 0, 57),
+        (35, 0, 57),
+        (35, 0, 57),
+        (41, 0, 57),
     ];
     for (frame, (x, y, z)) in tower.iter().zip(expected) {
         assert_eq!(
@@ -105,7 +105,7 @@ fn a_pythagorean_configuration_gives_an_exact_pose() {
     // arithmetic is the point; an expectation read off this code would prove nothing.
     assert_eq!(
         pose.p,
-        Vec3::new(rational(424, 13), rational(318, 13), rational(-50, 13))
+        Vec3::new(rational(1532, 65), rational(1149, 65), rational(61, 13))
     );
 
     let expected = [
@@ -206,9 +206,9 @@ fn the_homogeneous_matrix_is_exact() {
     let m = fk_cs(&g, &theta).to_matrix4();
     assert_eq!(m[3], [R::zero(), R::zero(), R::zero(), R::one()]);
     // Frame 6's origin, again from the independent Fraction computation.
-    assert_eq!(m[0][3], R::integer(40));
-    assert_eq!(m[1][3], R::integer(30));
-    assert_eq!(m[2][3], R::integer(-10));
+    assert_eq!(m[0][3], R::integer(28));
+    assert_eq!(m[1][3], R::integer(21));
+    assert_eq!(m[2][3], R::integer(1));
     // The rotation is a half turn about the y axis composed with the base rotation.
     assert_eq!(m[0][0], rational(4, 5));
     assert_eq!(m[0][1], rational(3, 5));

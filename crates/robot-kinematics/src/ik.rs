@@ -351,11 +351,31 @@ mod tests {
         }
     }
 
+    /// A configuration with the elbow bent, so the wrist centre sits inside the band on
+    /// both shoulder branches.
+    ///
+    /// The documented rest pose cannot serve this: standing the arm straight out puts the
+    /// wrist centre at planar radius `a1 + a2 = 35` and height `d4 = 25`, and the mirrored
+    /// branch then asks for `sqrt((35 + 10)^2 + 25^2) = sqrt(2650)`, just past the reach
+    /// `L1 + L2 = 50`. Folding the elbow to 135 degrees brings both branches inside.
+    fn folded_pose() -> (Geometry<f64>, Pose<f64>) {
+        let g = Geometry::<f64>::shipped();
+        let theta = [
+            0.0,
+            crate::units::total_angle(90.0, 0.0),
+            core::f64::consts::PI * 0.75,
+            0.0,
+            core::f64::consts::PI / 6.0,
+            core::f64::consts::PI / 4.0,
+        ];
+        (g, fk(&g, &theta))
+    }
+
     #[test]
     fn the_rest_pose_has_both_shoulder_branches_and_both_elbow_branches() {
         // Eight candidates, one per (shoulder, elbow, wrist) label. The wrist branch is not
         // recorded on `Solution`, so it is the count that witnesses it.
-        let (g, target) = rest_pose();
+        let (g, target) = folded_pose();
         let mut out = SolutionSet::new();
         solutions(&g, &target, &mut out);
         assert_eq!(out.len(), 8);

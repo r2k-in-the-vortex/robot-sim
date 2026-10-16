@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn an_unreachable_target_returns_no_solutions() {
         // `test_kinematics.py:155-162`: 100 units out on every axis is far outside an arm
-        // whose links are 40 units each.
+        // whose links are 25 units each.
         let target = Pose::new(
             Mat3::identity(),
             robot_kinematics::Vec3::new(100.0, 100.0, 100.0),
@@ -216,7 +216,7 @@ mod tests {
     fn a_table_with_a_legacy_theta_key_still_solves() {
         // The document's static offsets are the only angles that reach the solver, and
         // joint 2's shipped offset of 90 degrees is the one that must be folded in.
-        let row = DhRow::new(90.0, 0.0, 40.0, 0.0);
+        let row = DhRow::new(90.0, 0.0, 25.0, 0.0);
         assert_eq!(row.theta_offset_deg, 90.0);
         let parameters = DHParameters::shipped();
         let theta = parameters.total_angles_rad(&[0.0; JOINT_COUNT]);

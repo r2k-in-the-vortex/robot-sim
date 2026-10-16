@@ -51,9 +51,12 @@ impl Default for Document {
 }
 
 impl Document {
-    /// The document `robot_parameters.json` ships, which is also the state a fresh
-    /// install starts in: the illustrative DH table, seven empty mesh slots, and every
-    /// gizmo and label visible.
+    /// The document a fresh install starts in, and what the view opens on when no
+    /// configuration file is found at all: the DH table `robot_parameters.json` ships,
+    /// seven empty mesh slots, and every gizmo and label visible.
+    ///
+    /// The shipped file is this document plus the seven mesh settings, so the two are
+    /// not equal — `persist`'s round-trip test pins the table they do share.
     pub fn shipped() -> Self {
         Self::default()
     }

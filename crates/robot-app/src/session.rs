@@ -760,6 +760,12 @@ fn path_suffix_lower(path: &str) -> String {
 /// working directory. The second is what makes `cargo run` from the repository root find the
 /// file that ships there — without it the app would always open on the defaults, since
 /// `cargo run` puts the binary in `target/`.
+///
+/// The build stages a copy of the shipped file, and the `mesh/` tree beside it, into the
+/// directory the executable lands in (`build.rs`), so the first branch is what an executable
+/// run from its own directory takes. That copy is authoritative while it is there: a save
+/// through the dialog writes it, and the next build only overwrites it if the shipped file
+/// itself has changed.
 pub fn default_config_path() -> PathBuf {
     let beside_executable = std::env::current_exe()
         .ok()
@@ -997,7 +1003,7 @@ mod tests {
         let (mut session, mut document, mut angles) = session();
         // Column 2 is `a`; the columns are theta, d, a, alpha (`simulator.py:461-490`).
         session.dh[1][2] = String::from("70");
-        assert_eq!(document.parameters.joints[1].a, 40.0, "not applied yet");
+        assert_eq!(document.parameters.joints[1].a, 25.0, "not applied yet");
 
         session.jog_joint(0, 1, &mut document, &mut angles);
         assert_eq!(document.parameters.joints[1].a, 70.0);
@@ -1113,7 +1119,7 @@ mod tests {
     fn an_unreachable_target_leaves_the_arm_alone() {
         // `_pose_jog` refuses the whole move when the solve comes back empty
         // (`simulator.py:385-387`). A step a million units long is well outside an arm whose
-        // links are 40 units.
+        // links are 25 units.
         let (mut session, mut document, mut angles) = session();
         let before = angles;
         let before_parameters = document.parameters;
@@ -1492,9 +1498,9 @@ mod tests {
         let lines: Vec<&str> = text.split('\n').collect();
         assert_eq!(lines.len(), 15);
         assert_eq!(lines[0], "T6 position (model units):");
-        assert!(lines[1].starts_with("X: 60"), "{:?}", lines[1]);
+        assert!(lines[1].starts_with("X: 41"), "{:?}", lines[1]);
         assert!(lines[2].starts_with("Y: "), "{:?}", lines[2]);
-        assert!(lines[3].starts_with("Z: 80"), "{:?}", lines[3]);
+        assert!(lines[3].starts_with("Z: 57"), "{:?}", lines[3]);
         assert_eq!(lines[4], "T6 orientation (RPY, ZYX, degrees):");
         assert!(lines[5].starts_with("Roll: "), "{:?}", lines[5]);
         assert!(lines[6].starts_with("Pitch: "), "{:?}", lines[6]);
@@ -1520,14 +1526,14 @@ mod tests {
 
     #[test]
     fn the_zero_pose_copies_the_documented_tool_origin() {
-        // `d1 + a2 + d4 + d6` along +x is 40 + 40 + 40 + 10 = 130 at zero angles... but the
+        // `d1 + a2 + d4 + d6` along +x is 32 + 25 + 25 + 6 = 88 at zero angles... but the
         // arm's frames stack along z for the first three, so the shipped arm at rest reaches
-        // (60, 0, 80), the pose `doc/main_window_image.png` shows.
+        // (41, 0, 57), the pose `doc/main_window_image.png` shows.
         let document = Document::shipped();
         let text =
             Session::copy_xyz_text(&document.parameters, &[0.0; JOINT_COUNT]).expect("shipped");
-        assert_eq!(text.lines().nth(1).expect("X line"), "X: 60");
-        assert_eq!(text.lines().nth(3).expect("Z line"), "Z: 80");
+        assert_eq!(text.lines().nth(1).expect("X line"), "X: 41");
+        assert_eq!(text.lines().nth(3).expect("Z line"), "Z: 57");
     }
 
     // --- the shared helpers ---------------------------------------------------------

@@ -1,0 +1,12 @@
+   Compiling fixture_crate v0.1.0 (C:\Users\rkord\AppData\Local\Temp\robot-arm-fixtures\scratch-crate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src\lib.rs (target\debug\deps\fixture_crate-554cd5328b95885f.exe)
+tests::fails: test
+tests::ignored: test
+tests::passes: test
+
+3 tests, 0 benchmarks
+   Doc-tests fixture_crate
+src\lib.rs - add_one (line 6): test
+
+1 test, 0 benchmarks

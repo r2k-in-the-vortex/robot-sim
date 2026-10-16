@@ -288,9 +288,9 @@ def frames (g : Geometry) (θ : Fin 6 → CosSin) : List Pose :=
 
 /-! ## Geometries -/
 
-/-- The geometry `robot_parameters.json` ships: `a1 = 10`, `d1 = 40`, `a2 = 40`, `d4 = 40`,
-`d6 = 10`. -/
-def shippedGeometry : Geometry := ⟨10, 40, 40, 40, 10⟩
+/-- The geometry `robot_parameters.json` ships: `a1 = 10`, `d1 = 32`, `a2 = 25`, `d4 = 25`,
+`d6 = 6`. -/
+def shippedGeometry : Geometry := ⟨10, 32, 25, 25, 6⟩
 
 /-- A second arm, so the generator is not accidentally hard-wired to one set of link
 lengths: shorter links, a smaller tool, and `a1 = 0`, which puts the frame-1 origin on the

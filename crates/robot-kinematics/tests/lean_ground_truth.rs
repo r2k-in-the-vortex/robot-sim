@@ -325,10 +325,10 @@ fn every_rotation_the_chain_produces_is_a_rotation() {
 fn the_corpus_covers_more_than_one_arm() {
     let shipped = Geometry::new(
         R::integer(10),
-        R::integer(40),
-        R::integer(40),
-        R::integer(40),
-        R::integer(10),
+        R::integer(32),
+        R::integer(25),
+        R::integer(25),
+        R::integer(6),
     )
     .expect("the shipped geometry is a supported arm");
 
@@ -360,12 +360,12 @@ fn the_documented_zero_pose_matches_the_simulator() {
     let tower = carrier_pose_cs(&case.geometry, &case.theta);
     let origins = [
         (0, 0, 0),
-        (10, 0, 40),
-        (10, 0, 80),
-        (10, 0, 80),
-        (50, 0, 80),
-        (50, 0, 80),
-        (60, 0, 80),
+        (10, 0, 32),
+        (10, 0, 57),
+        (10, 0, 57),
+        (35, 0, 57),
+        (35, 0, 57),
+        (41, 0, 57),
     ];
     for (i, (frame, (x, y, z))) in tower.iter().zip(origins).enumerate() {
         assert_eq!(

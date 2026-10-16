@@ -306,13 +306,13 @@ structure NamedGeometry where
 def NamedGeometry.targetAt (ng : NamedGeometry) (center : Vec) : Target :=
   Target.ofCenter ng.a1 ng.d1 ng.linkOne ng.linkTwo center
 
-/-- The geometry `robot_parameters.json` ships: `a1 = 10`, `d1 = 40`, `a2 = 40`, `d4 = 40`. -/
+/-- The geometry `robot_parameters.json` ships: `a1 = 10`, `d1 = 32`, `a2 = 25`, `d4 = 25`. -/
 def shipped : NamedGeometry :=
   { name := "shipped"
     a1 := 10
-    d1 := 40
-    linkOne := 40
-    linkTwo := 40
+    d1 := 32
+    linkOne := 25
+    linkTwo := 25
     note := "the arm `robot_parameters.json` ships, whose equal links make the fold-back \
       clause reachable and whose `(L1 - L2) ^ 2` is zero make the inner band edge attainable \
       only by folding the second link back onto the first" }
@@ -428,7 +428,7 @@ def cases : List Case := [
       which they can only get right because they compare `m * m ≥ 0 ∈ ...` the right way \
       round."
     branch := "m_nonpos_k_neg"
-    center := ![0, 0, 40]
+    center := ![0, 0, 32]
     relativeRotation := identityRotation
     zyz := some (⟨1, 0⟩, ⟨1, 0⟩, ⟨1, 0⟩)
     radius := some 0
@@ -448,7 +448,7 @@ def cases : List Case := [
       `500` - well inside the band - where the case below has it exactly at the inner edge. \
       An off-singularity rotation, so the two halves of the plan are seen to be independent."
     branch := "m_nonpos_k_pos"
-    center := ![0, 0, 60]
+    center := ![0, 0, 52]
     relativeRotation := genericWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨5 / 13, 12 / 13⟩, ⟨15 / 17, 8 / 17⟩)
     radius := some 0
@@ -463,7 +463,7 @@ def cases : List Case := [
   -- branches disagree about it, because the clause's sign half is per branch.
   { name := "shipped/the_fold_back"
     geometry := shipped
-    note := "The fold-back: with `r = 10` the centre `(10, 0, 40)` is the frame-1 origin \
+    note := "The fold-back: with `r = 10` the centre `(10, 0, 32)` is the frame-1 origin \
       itself, `q +1 = r - a1 = 0`, `h = 0`, and `linkOne = linkTwo`. Only `σ = +1` satisfies \
       `radicalEqZero`'s sign half `alpha * beta ≤ 0`: `beta = -2 * σ * a1` is `-20` there and \
       `+20` on `σ = -1`, against `alpha = 200 > 0`, so `fold_back` is `[true, false]` and the \
@@ -471,7 +471,7 @@ def cases : List Case := [
       exactly - `q +1 ^ 2 + h ^ 2 = 0 = (L1 - L2) ^ 2` - and it reaches it through the \
       sign-care arm at that arm's own boundary, `k * k * rho = m * m = 40000`."
     branch := "m_nonpos_k_neg"
-    center := ![10, 0, 40]
+    center := ![10, 0, 32]
     relativeRotation := quarterTurnRotation
     zyz := some (⟨0, 1⟩, ⟨1, 0⟩, ⟨1, 0⟩)
     radius := some 10
@@ -492,7 +492,7 @@ def cases : List Case := [
       `h = 0` exactly rather than as a small height, and it is also an instance of the \
       sign-care arm's strict inequality: `m * m = 40000 + ... > k * k * rho = 40000`."
     branch := "m_nonpos_k_neg"
-    center := ![10, 0, 40000001 / 1000000]
+    center := ![10, 0, 32000001 / 1000000]
     relativeRotation := flatWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨1, 0⟩, ⟨15 / 17, -8 / 17⟩)
     radius := some 10
@@ -513,7 +513,7 @@ def cases : List Case := [
       m * m = 22500`, strictly - a `≤` in place of the `≥` there would drop a reachable pose, \
       which is the sign care this case exists to catch."
     branch := "m_nonpos_k_neg"
-    center := ![5, 5, 40]
+    center := ![5, 5, 32]
     relativeRotation := genericWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨5 / 13, 12 / 13⟩, ⟨15 / 17, 8 / 17⟩)
     expected :=
@@ -527,15 +527,15 @@ def cases : List Case := [
   -- the band are available and have to agree.
   { name := "shipped/well_inside_the_band_off_axis"
     geometry := shipped
-    note := "Well inside on both branches: `rho = 3600 = 60 ^ 2` off the x axis, `q +1 = 50` \
-      and `q -1 = -70`, so `q +1 ^ 2 + h ^ 2 = 2500` and `q -1 ^ 2 + h ^ 2 = 4900` are both \
-      inside `[0, 6400]` with room to spare. The `k = 0` arm is the one this arm never takes: \
+    note := "Well inside on both branches: `rho = 900 = 30 ^ 2` off the x axis, `q +1 = 20` \
+      and `q -1 = -40`, so `q +1 ^ 2 + h ^ 2 = 500` and `q -1 ^ 2 + h ^ 2 = 1700` are both \
+      inside `[0, 2500]` with room to spare. The `k = 0` arm is the one this arm never takes: \
       both lower-edge comparisons reach `m ≤ 0` with `k ≠ 0` and decide on the sign."
     branch := "m_nonpos_k_pos"
-    center := ![48, 36, 40]
+    center := ![18, 24, 42]
     relativeRotation := genericWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨5 / 13, 12 / 13⟩, ⟨15 / 17, 8 / 17⟩)
-    radius := some 60
+    radius := some 30
     expected :=
       { radiusIsZero := false
         elbowBranches := ⟨true, true⟩
@@ -548,11 +548,11 @@ def cases : List Case := [
   { name := "shipped/inside_the_upper_edge_by_a_hair"
     geometry := shipped
     note := "The outer band edge approached from inside by a millionth of a unit: `alpha - \
-      6400 = 200 - 160 / 10 ^ 6 + 10 ^ -12 > 0`, so the `+1` branch's upper comparison takes \
+      2500 = 200 - 100 / 10 ^ 6 + 10 ^ -12 > 0`, so the `+1` branch's upper comparison takes \
       the arm that decides by squaring - `m * m ≤ k * k * rho`, strictly here - and says \
       reachable, while `σ = -1`, twenty units further out, is dropped."
     branch := "m_pos_k_pos"
-    center := ![10, 0, 119999999 / 1000000]
+    center := ![10, 0, 81999999 / 1000000]
     relativeRotation := genericWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨5 / 13, 12 / 13⟩, ⟨15 / 17, 8 / 17⟩)
     radius := some 10
@@ -565,15 +565,15 @@ def cases : List Case := [
         candidateCount := 4 } },
   { name := "shipped/the_upper_edge_exactly"
     geometry := shipped
-    note := "The upper band edge hit exactly: `q +1 = 0` with `h = 80 = L1 + L2`, so \
-      `q +1 ^ 2 + h ^ 2 = 6400` and the arm is stretched straight out. `Set.Icc (-1) 1` \
+    note := "The upper band edge hit exactly: `q +1 = 0` with `h = 50 = L1 + L2`, so \
+      `q +1 ^ 2 + h ^ 2 = 2500` and the arm is stretched straight out. `Set.Icc (-1) 1` \
       includes its ends, so the `+1` branch is reachable, and the squaring arm meets it at \
-      `m * m = k * k * rho = 40000` exactly. `σ = -1` at `q -1 = -20` has `6800 > 6400` and is \
+      `m * m = k * k * rho = 40000` exactly. `σ = -1` at `q -1 = -20` has `2900 > 2500` and is \
       dropped, so one pose carries both answers. With `a1 ≠ 0` an exact edge forces `rho` to \
       be a rational square - the edge equation is linear in `r = sqrt rho`, so `r` must be \
       rational to hold at a rational centre - and here it is `10`."
     branch := "m_pos_k_pos"
-    center := ![10, 0, 120]
+    center := ![10, 0, 82]
     relativeRotation := genericWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨5 / 13, 12 / 13⟩, ⟨15 / 17, 8 / 17⟩)
     radius := some 10
@@ -589,10 +589,10 @@ def cases : List Case := [
     note := "The same edge from outside, by the same millionth: the `+1` branch's squaring arm \
       now has `m * m > k * k * rho` and the branch is dropped, and `σ = -1` is dropped with \
       it, so `candidate_count` is 0. With the two cases above it fixes the band as the closed \
-      interval `[0, 6400]` at three heights one millionth apart: a strict inequality at either \
+      interval `[0, 2500]` at three heights one millionth apart: a strict inequality at either \
       end of the test gets one of the three wrong."
     branch := "m_pos_k_neg"
-    center := ![10, 0, 120000001 / 1000000]
+    center := ![10, 0, 82000001 / 1000000]
     relativeRotation := genericWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨5 / 13, 12 / 13⟩, ⟨15 / 17, 8 / 17⟩)
     radius := some 10
@@ -607,17 +607,17 @@ def cases : List Case := [
   -- reaches it.
   { name := "shipped/the_upper_edge_exactly_mirrored"
     geometry := shipped
-    note := "The same edge from the other shoulder branch: `(70, 0, 40)` puts `q -1 = -80` on \
-      the edge and leaves `σ = +1`, at `q +1 = 60`, strictly inside. The edge comparison is \
-      then `m = alpha - 6400 = -1400 ≤ 0` with `k = -20 < 0` - the sign-care arm - and it \
-      meets that arm's boundary `k * k * rho = m * m = 1960000` exactly, where the `+1` edge \
+    note := "The same edge from the other shoulder branch: `(40, 0, 32)` puts `q -1 = -50` on \
+      the edge and leaves `σ = +1`, at `q +1 = 30`, strictly inside. The edge comparison is \
+      then `m = alpha - 2500 = -800 ≤ 0` with `k = -20 < 0` - the sign-care arm - and it \
+      meets that arm's boundary `k * k * rho = m * m = 640000` exactly, where the `+1` edge \
       case meets the squaring arm's. The two `m * m` comparisons of the band are therefore \
       pinned at equality, one by each shoulder branch."
     branch := "m_nonpos_k_neg"
-    center := ![70, 0, 40]
+    center := ![40, 0, 32]
     relativeRotation := genericWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨5 / 13, 12 / 13⟩, ⟨15 / 17, 8 / 17⟩)
-    radius := some 70
+    radius := some 40
     expected :=
       { radiusIsZero := false
         elbowBranches := ⟨true, true⟩
@@ -631,10 +631,10 @@ def cases : List Case := [
     geometry := shipped
     note := "rho = 0 with `h = 100`: the wrist centre is on the base axis, so \
       `radius_is_zero` and `wrist_center_on_base_axis` are true, and `q σ ^ 2 + h ^ 2 = 10100` \
-      is past `(L1 + L2) ^ 2 = 6400`, so both branches are dropped and the count is 0. The \
+      is past `(L1 + L2) ^ 2 = 2500`, so both branches are dropped and the count is 0. The \
       anchor is a decision about `rho` alone and says nothing about reachability."
     branch := "m_pos_k_neg"
-    center := ![0, 0, 140]
+    center := ![0, 0, 132]
     relativeRotation := identityRotation
     zyz := some (⟨1, 0⟩, ⟨1, 0⟩, ⟨1, 0⟩)
     radius := some 0
@@ -648,14 +648,15 @@ def cases : List Case := [
   { name := "shipped/upper_edge_with_an_off_axis_center"
     geometry := shipped
     note := "The `+1` upper edge again, with `y ≠ 0` and both halves of the centre rational \
-      rather than integral: `rho = 3364 = 58 ^ 2`, `q +1 = 48`, `h = 64`. `(48, 64)` is a \
-      Pythagorean point, so `q +1 ^ 2 + h ^ 2 = 6400` exactly and `m * m = k * k * rho` again \
-      holds with equality; `σ = -1`, at `q -1 = -68`, has `8720 > 6400` and is dropped."
+      rather than integral: `rho = 1600 = 40 ^ 2`, `q +1 = 30`, `h = 40`. `(30, 40)` is a \
+      Pythagorean point, so `q +1 ^ 2 + h ^ 2 = 2500` exactly and `m * m = k * k * rho = \
+      640000` again holds with equality; `σ = -1`, at `q -1 = -50`, has `4100 > 2500` and is \
+      dropped."
     branch := "m_pos_k_pos"
-    center := ![174 / 5, 232 / 5, 104]
+    center := ![56 / 5, 192 / 5, 72]
     relativeRotation := genericWristRotation
     zyz := some (⟨4 / 5, 3 / 5⟩, ⟨5 / 13, 12 / 13⟩, ⟨15 / 17, 8 / 17⟩)
-    radius := some 58
+    radius := some 40
     expected :=
       { radiusIsZero := false
         elbowBranches := ⟨true, false⟩

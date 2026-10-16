@@ -158,12 +158,12 @@ mod tests {
     /// `DEFAULT_DH_VALUES` (`simulator.py:30-37`), which is also the table in
     /// `robot_parameters.json`.
     const SHIPPED_DH_DEG: [(f64, f64, f64, f64); 6] = [
-        (0.0, 40.0, 10.0, 90.0),
-        (90.0, 0.0, 40.0, 0.0),
+        (0.0, 32.0, 10.0, 90.0),
+        (90.0, 0.0, 25.0, 0.0),
         (0.0, 0.0, 0.0, 90.0),
-        (0.0, 40.0, 0.0, 90.0),
+        (0.0, 25.0, 0.0, 90.0),
         (0.0, 0.0, 0.0, -90.0),
-        (0.0, 10.0, 0.0, 0.0),
+        (0.0, 6.0, 0.0, 0.0),
     ];
 
     /// The runtime joint angles the Python tests jog from (`test_kinematics.py:188`).

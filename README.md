@@ -257,7 +257,12 @@ read and write `Path(__file__).with_name("robot_parameters.json")`, the file bes
 the script, and report through a message box. A compiled binary has no script
 directory to anchor that to, so the Rust starts at the same name — beside the
 executable, then in the working directory, then beside the executable — and opens
-whatever the user picks. The bytes written are unaffected, apart from line endings:
+whatever the user picks. `crates/robot-app/build.rs` stages the shipped file there
+when it builds, together with the `mesh/` tree its relative mesh paths need, so an
+executable run from its own directory opens the real robot rather than the empty
+default document; the copies are skipped when the bytes already match, which leaves
+a configuration the app itself saved beside the binary alone until the shipped file
+changes. The bytes written are unaffected, apart from line endings:
 Python's `write_text` is text mode, so it turns the newlines into CRLF on Windows,
 while the Rust writes `json.dumps(data, indent=2) + "\n"` as-is. Both read either
 form back.

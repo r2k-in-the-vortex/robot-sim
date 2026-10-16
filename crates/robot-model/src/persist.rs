@@ -791,7 +791,15 @@ mod tests {
         let shipped = shipped_text();
         let root = repo_root();
         let document = parse(&shipped, &root).expect("the shipped file parses");
-        assert_eq!(document, Document::shipped(), "the shipped document");
+        // The table is the one `DHParameters::shipped` documents, which is what keeps the
+        // default document and the file from drifting apart on the numbers the solver reads.
+        // The mesh settings are deliberately the file's own and not the default's: a fresh
+        // install starts on `Document::default`'s seven empty slots, and the file fills them.
+        assert_eq!(
+            document.parameters,
+            DHParameters::shipped(),
+            "the shipped table"
+        );
         let written = to_json(&document, &root).expect("the shipped document serializes");
         assert_eq!(written, shipped, "byte for byte");
     }
@@ -813,7 +821,8 @@ mod tests {
     fn a_legacy_theta_deg_key_is_read_as_the_static_offset() {
         let legacy = shipped_text().replace("\"theta_offset_deg\"", "\"theta_deg\"");
         let document = parse(&legacy, &repo_root()).expect("the legacy spelling parses");
-        assert_eq!(document, Document::shipped(), "the same document");
+        let modern = parse(&shipped_text(), &repo_root()).expect("the modern spelling parses");
+        assert_eq!(document, modern, "the same document");
         let written = to_json(&document, &repo_root()).expect("serialize");
         assert!(written.contains("\"theta_offset_deg\": 90.0"));
         assert!(

@@ -94,7 +94,7 @@ impl LinkMeshes {
 ///
 /// The document carries no scale field, but the shipped meshes are not in the model's own
 /// units: measured over `mesh/`, they span up to 640 units, while the shipped DH table puts
-/// the whole arm inside roughly 80. `simulator.py` places the raw STL coordinates and lets
+/// the whole arm inside roughly 60. `simulator.py` places the raw STL coordinates and lets
 /// the camera fit absorb the difference (lines 908-919), which is why the reference view
 /// frames a bounding box several times larger than the arm. A tenth brings a mesh into the
 /// model's range, and is the millimetre-to-model-unit ratio the part numbering implies.

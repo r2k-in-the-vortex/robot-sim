@@ -530,9 +530,9 @@ fn the_geometries_are_the_arms_the_forward_chain_corpus_uses() {
         (shipped.a1, shipped.d1, shipped.link_one, shipped.link_two),
         (
             R::integer(10),
-            R::integer(40),
-            R::integer(40),
-            R::integer(40)
+            R::integer(32),
+            R::integer(25),
+            R::integer(25)
         ),
         "`Geometry::shipped` is the arm the corpus's `shipped` documents"
     );

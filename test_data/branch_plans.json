@@ -4,9 +4,9 @@
  [{"note":
    "the arm `robot_parameters.json` ships, whose equal links make the fold-back clause reachable and whose `(L1 - L2) ^ 2` is zero make the inner band edge attainable only by folding the second link back onto the first",
    "name": "shipped",
-   "link_two": "40",
-   "link_one": "40",
-   "d1": "40",
+   "link_two": "25",
+   "link_one": "25",
+   "d1": "32",
    "a1": "10"},
   {"note":
    "the forward-chain corpus's second arm; `a1 = 0` puts the frame-1 origin on the base rotation axis, which is what exercises `leOfRadical`'s `k = 0` arm, and `linkOne ≠ linkTwo` makes the fold-back clause unreachable on it",
@@ -29,7 +29,7 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [true, true]],
     "candidate_count": 8},
-   "center": ["0", "0", "40"],
+   "center": ["0", "0", "32"],
    "branch": "m_nonpos_k_neg"},
   {"relative_rotation":
    [["-12/1105", "-149/221", "-48/65"],
@@ -47,12 +47,12 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [true, true]],
     "candidate_count": 8},
-   "center": ["0", "0", "60"],
+   "center": ["0", "0", "52"],
    "branch": "m_nonpos_k_pos"},
   {"relative_rotation": [["0", "-1", "0"], ["1", "0", "0"], ["0", "0", "1"]],
    "radius": "10",
    "note":
-   "The fold-back: with `r = 10` the centre `(10, 0, 40)` is the frame-1 origin itself, `q +1 = r - a1 = 0`, `h = 0`, and `linkOne = linkTwo`. Only `σ = +1` satisfies `radicalEqZero`'s sign half `alpha * beta ≤ 0`: `beta = -2 * σ * a1` is `-20` there and `+20` on `σ = -1`, against `alpha = 200 > 0`, so `fold_back` is `[true, false]` and the case pins which shoulder owns the fold. The same comparison is the lower band edge hit exactly - `q +1 ^ 2 + h ^ 2 = 0 = (L1 - L2) ^ 2` - and it reaches it through the sign-care arm at that arm's own boundary, `k * k * rho = m * m = 40000`.",
+   "The fold-back: with `r = 10` the centre `(10, 0, 32)` is the frame-1 origin itself, `q +1 = r - a1 = 0`, `h = 0`, and `linkOne = linkTwo`. Only `σ = +1` satisfies `radicalEqZero`'s sign half `alpha * beta ≤ 0`: `beta = -2 * σ * a1` is `-20` there and `+20` on `σ = -1`, against `alpha = 200 > 0`, so `fold_back` is `[true, false]` and the case pins which shoulder owns the fold. The same comparison is the lower band edge hit exactly - `q +1 ^ 2 + h ^ 2 = 0 = (L1 - L2) ^ 2` - and it reaches it through the sign-care arm at that arm's own boundary, `k * k * rho = m * m = 40000`.",
    "name": "shipped/the_fold_back",
    "geometry": "shipped",
    "expected":
@@ -62,7 +62,7 @@
     "fold_back": [true, false],
     "elbow_branches": [[true, true], [true, true]],
     "candidate_count": 8},
-   "center": ["10", "0", "40"],
+   "center": ["10", "0", "32"],
    "branch": "m_nonpos_k_neg"},
   {"relative_rotation":
    [["84/85", "-13/85", "0"], ["13/85", "84/85", "0"], ["0", "0", "1"]],
@@ -78,7 +78,7 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [true, true]],
     "candidate_count": 8},
-   "center": ["10", "0", "40000001/1000000"],
+   "center": ["10", "0", "32000001/1000000"],
    "branch": "m_nonpos_k_neg"},
   {"relative_rotation":
    [["-12/1105", "-149/221", "-48/65"],
@@ -96,15 +96,15 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [true, true]],
     "candidate_count": 8},
-   "center": ["5", "5", "40"],
+   "center": ["5", "5", "32"],
    "branch": "m_nonpos_k_neg"},
   {"relative_rotation":
    [["-12/1105", "-149/221", "-48/65"],
     ["641/1105", "132/221", "-36/65"],
     ["180/221", "-96/221", "5/13"]],
-   "radius": "60",
+   "radius": "30",
    "note":
-   "Well inside on both branches: `rho = 3600 = 60 ^ 2` off the x axis, `q +1 = 50` and `q -1 = -70`, so `q +1 ^ 2 + h ^ 2 = 2500` and `q -1 ^ 2 + h ^ 2 = 4900` are both inside `[0, 6400]` with room to spare. The `k = 0` arm is the one this arm never takes: both lower-edge comparisons reach `m ≤ 0` with `k ≠ 0` and decide on the sign.",
+   "Well inside on both branches: `rho = 900 = 30 ^ 2` off the x axis, `q +1 = 20` and `q -1 = -40`, so `q +1 ^ 2 + h ^ 2 = 500` and `q -1 ^ 2 + h ^ 2 = 1700` are both inside `[0, 2500]` with room to spare. The `k = 0` arm is the one this arm never takes: both lower-edge comparisons reach `m ≤ 0` with `k ≠ 0` and decide on the sign.",
    "name": "shipped/well_inside_the_band_off_axis",
    "geometry": "shipped",
    "expected":
@@ -114,7 +114,7 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [true, true]],
     "candidate_count": 8},
-   "center": ["48", "36", "40"],
+   "center": ["18", "24", "42"],
    "branch": "m_nonpos_k_pos"},
   {"relative_rotation":
    [["-12/1105", "-149/221", "-48/65"],
@@ -122,7 +122,7 @@
     ["180/221", "-96/221", "5/13"]],
    "radius": "10",
    "note":
-   "The outer band edge approached from inside by a millionth of a unit: `alpha - 6400 = 200 - 160 / 10 ^ 6 + 10 ^ -12 > 0`, so the `+1` branch's upper comparison takes the arm that decides by squaring - `m * m ≤ k * k * rho`, strictly here - and says reachable, while `σ = -1`, twenty units further out, is dropped.",
+   "The outer band edge approached from inside by a millionth of a unit: `alpha - 2500 = 200 - 100 / 10 ^ 6 + 10 ^ -12 > 0`, so the `+1` branch's upper comparison takes the arm that decides by squaring - `m * m ≤ k * k * rho`, strictly here - and says reachable, while `σ = -1`, twenty units further out, is dropped.",
    "name": "shipped/inside_the_upper_edge_by_a_hair",
    "geometry": "shipped",
    "expected":
@@ -132,7 +132,7 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [false, false]],
     "candidate_count": 4},
-   "center": ["10", "0", "119999999/1000000"],
+   "center": ["10", "0", "81999999/1000000"],
    "branch": "m_pos_k_pos"},
   {"relative_rotation":
    [["-12/1105", "-149/221", "-48/65"],
@@ -140,7 +140,7 @@
     ["180/221", "-96/221", "5/13"]],
    "radius": "10",
    "note":
-   "The upper band edge hit exactly: `q +1 = 0` with `h = 80 = L1 + L2`, so `q +1 ^ 2 + h ^ 2 = 6400` and the arm is stretched straight out. `Set.Icc (-1) 1` includes its ends, so the `+1` branch is reachable, and the squaring arm meets it at `m * m = k * k * rho = 40000` exactly. `σ = -1` at `q -1 = -20` has `6800 > 6400` and is dropped, so one pose carries both answers. With `a1 ≠ 0` an exact edge forces `rho` to be a rational square - the edge equation is linear in `r = sqrt rho`, so `r` must be rational to hold at a rational centre - and here it is `10`.",
+   "The upper band edge hit exactly: `q +1 = 0` with `h = 50 = L1 + L2`, so `q +1 ^ 2 + h ^ 2 = 2500` and the arm is stretched straight out. `Set.Icc (-1) 1` includes its ends, so the `+1` branch is reachable, and the squaring arm meets it at `m * m = k * k * rho = 40000` exactly. `σ = -1` at `q -1 = -20` has `2900 > 2500` and is dropped, so one pose carries both answers. With `a1 ≠ 0` an exact edge forces `rho` to be a rational square - the edge equation is linear in `r = sqrt rho`, so `r` must be rational to hold at a rational centre - and here it is `10`.",
    "name": "shipped/the_upper_edge_exactly",
    "geometry": "shipped",
    "expected":
@@ -150,7 +150,7 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [false, false]],
     "candidate_count": 4},
-   "center": ["10", "0", "120"],
+   "center": ["10", "0", "82"],
    "branch": "m_pos_k_pos"},
   {"relative_rotation":
    [["-12/1105", "-149/221", "-48/65"],
@@ -158,7 +158,7 @@
     ["180/221", "-96/221", "5/13"]],
    "radius": "10",
    "note":
-   "The same edge from outside, by the same millionth: the `+1` branch's squaring arm now has `m * m > k * k * rho` and the branch is dropped, and `σ = -1` is dropped with it, so `candidate_count` is 0. With the two cases above it fixes the band as the closed interval `[0, 6400]` at three heights one millionth apart: a strict inequality at either end of the test gets one of the three wrong.",
+   "The same edge from outside, by the same millionth: the `+1` branch's squaring arm now has `m * m > k * k * rho` and the branch is dropped, and `σ = -1` is dropped with it, so `candidate_count` is 0. With the two cases above it fixes the band as the closed interval `[0, 2500]` at three heights one millionth apart: a strict inequality at either end of the test gets one of the three wrong.",
    "name": "shipped/outside_the_upper_edge_by_a_hair",
    "geometry": "shipped",
    "expected":
@@ -168,15 +168,15 @@
     "fold_back": [false, false],
     "elbow_branches": [[false, false], [false, false]],
     "candidate_count": 0},
-   "center": ["10", "0", "120000001/1000000"],
+   "center": ["10", "0", "82000001/1000000"],
    "branch": "m_pos_k_neg"},
   {"relative_rotation":
    [["-12/1105", "-149/221", "-48/65"],
     ["641/1105", "132/221", "-36/65"],
     ["180/221", "-96/221", "5/13"]],
-   "radius": "70",
+   "radius": "40",
    "note":
-   "The same edge from the other shoulder branch: `(70, 0, 40)` puts `q -1 = -80` on the edge and leaves `σ = +1`, at `q +1 = 60`, strictly inside. The edge comparison is then `m = alpha - 6400 = -1400 ≤ 0` with `k = -20 < 0` - the sign-care arm - and it meets that arm's boundary `k * k * rho = m * m = 1960000` exactly, where the `+1` edge case meets the squaring arm's. The two `m * m` comparisons of the band are therefore pinned at equality, one by each shoulder branch.",
+   "The same edge from the other shoulder branch: `(40, 0, 32)` puts `q -1 = -50` on the edge and leaves `σ = +1`, at `q +1 = 30`, strictly inside. The edge comparison is then `m = alpha - 2500 = -800 ≤ 0` with `k = -20 < 0` - the sign-care arm - and it meets that arm's boundary `k * k * rho = m * m = 640000` exactly, where the `+1` edge case meets the squaring arm's. The two `m * m` comparisons of the band are therefore pinned at equality, one by each shoulder branch.",
    "name": "shipped/the_upper_edge_exactly_mirrored",
    "geometry": "shipped",
    "expected":
@@ -186,12 +186,12 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [true, true]],
     "candidate_count": 8},
-   "center": ["70", "0", "40"],
+   "center": ["40", "0", "32"],
    "branch": "m_nonpos_k_neg"},
   {"relative_rotation": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]],
    "radius": "0",
    "note":
-   "rho = 0 with `h = 100`: the wrist centre is on the base axis, so `radius_is_zero` and `wrist_center_on_base_axis` are true, and `q σ ^ 2 + h ^ 2 = 10100` is past `(L1 + L2) ^ 2 = 6400`, so both branches are dropped and the count is 0. The anchor is a decision about `rho` alone and says nothing about reachability.",
+   "rho = 0 with `h = 100`: the wrist centre is on the base axis, so `radius_is_zero` and `wrist_center_on_base_axis` are true, and `q σ ^ 2 + h ^ 2 = 10100` is past `(L1 + L2) ^ 2 = 2500`, so both branches are dropped and the count is 0. The anchor is a decision about `rho` alone and says nothing about reachability.",
    "name": "shipped/on_the_base_axis_out_of_reach",
    "geometry": "shipped",
    "expected":
@@ -201,15 +201,15 @@
     "fold_back": [false, false],
     "elbow_branches": [[false, false], [false, false]],
     "candidate_count": 0},
-   "center": ["0", "0", "140"],
+   "center": ["0", "0", "132"],
    "branch": "m_pos_k_neg"},
   {"relative_rotation":
    [["-12/1105", "-149/221", "-48/65"],
     ["641/1105", "132/221", "-36/65"],
     ["180/221", "-96/221", "5/13"]],
-   "radius": "58",
+   "radius": "40",
    "note":
-   "The `+1` upper edge again, with `y ≠ 0` and both halves of the centre rational rather than integral: `rho = 3364 = 58 ^ 2`, `q +1 = 48`, `h = 64`. `(48, 64)` is a Pythagorean point, so `q +1 ^ 2 + h ^ 2 = 6400` exactly and `m * m = k * k * rho` again holds with equality; `σ = -1`, at `q -1 = -68`, has `8720 > 6400` and is dropped.",
+   "The `+1` upper edge again, with `y ≠ 0` and both halves of the centre rational rather than integral: `rho = 1600 = 40 ^ 2`, `q +1 = 30`, `h = 40`. `(30, 40)` is a Pythagorean point, so `q +1 ^ 2 + h ^ 2 = 2500` exactly and `m * m = k * k * rho = 640000` again holds with equality; `σ = -1`, at `q -1 = -50`, has `4100 > 2500` and is dropped.",
    "name": "shipped/upper_edge_with_an_off_axis_center",
    "geometry": "shipped",
    "expected":
@@ -219,7 +219,7 @@
     "fold_back": [false, false],
     "elbow_branches": [[true, true], [false, false]],
     "candidate_count": 4},
-   "center": ["174/5", "232/5", "104"],
+   "center": ["56/5", "192/5", "72"],
    "branch": "m_pos_k_pos"},
   {"relative_rotation": [["1", "0", "0"], ["0", "1", "0"], ["0", "0", "1"]],
    "radius": "0",

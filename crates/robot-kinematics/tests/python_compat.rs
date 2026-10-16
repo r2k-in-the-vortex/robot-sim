@@ -443,8 +443,8 @@ fn recovered_sine(target: &Pose<f64>, candidate: &Solution<f64>) -> f64 {
 ///
 /// The distance that matters is from the frame-1 origin, and it carries the shoulder
 /// branch: `hypot (sigma * r - a1, h)`. Each centre below clears `link_one + link_two =
-/// 80` by tens of units — the closest, at `q = 80.5`, loses the band test in Python
-/// (`elbowCosine = 1.025`) as well as in the exact layer.
+/// 50` by tens of units — the closest, at `q = 50.5`, loses the band test in Python
+/// (`elbowCosine = 1.0402`) as well as in the exact layer.
 fn out_of_reach(geometry: &Geometry<f64>) -> Vec<Target> {
     let rotation = Mat3::<f64>::rot_z(0.3);
     let centers = [
@@ -466,7 +466,7 @@ fn out_of_reach(geometry: &Geometry<f64>) -> Vec<Target> {
         ),
         (
             "just past the stretched arm",
-            Vec3::new(geometry.a1 + 80.5, 0.0, geometry.d1),
+            Vec3::new(geometry.a1 + 50.5, 0.0, geometry.d1),
         ),
     ];
     centers
@@ -484,7 +484,9 @@ fn out_of_reach(geometry: &Geometry<f64>) -> Vec<Target> {
 /// is why these are a category of their own rather than a degeneracy to exclude.
 fn on_axis(geometry: &Geometry<f64>) -> Vec<Target> {
     let mut targets = Vec::new();
-    for z in [40.0, 60.0, 80.0, 100.0, 119.0] {
+    // `d1` up to just inside the reach: the on-axis band is `|h| <= sqrt((L1 + L2)^2 - a1^2)`
+    // = 48.99, so the top row keeps the category to poses the solver answers for.
+    for z in [32.0, 44.0, 56.0, 68.0, 80.0] {
         for azimuth in [0.0, 0.7, 2.5] {
             let target = Target::at_center(
                 geometry,
@@ -1019,12 +1021,18 @@ fn the_flat_split_is_the_exact_solver_s_documented_divergence() {
         "Python did not offer its flat split"
     );
 
-    // The exact solver never pins joint 4 to zero for its own reasons.
+    // The exact solver never constructs that candidate for its own reasons.
     let mut exact = SolutionSet::new();
     solutions(geometry, &target.pose, &mut exact);
     assert_eq!(exact.len(), 8, "one candidate per branch triple");
+    // The flat split is the *pair* — joint 4 held at zero with the wrist itself read as
+    // singular. `theta4 = 0` alone is not the witness: a read-back can land there by
+    // rounding at a wrist bent well away from the singularity, and at the shipped arm's
+    // lengths one does.
     assert!(
-        exact.iter().all(|candidate| candidate.angles[3] != 0.0),
+        exact
+            .iter()
+            .all(|candidate| candidate.angles[3] != 0.0 || candidate.angles[4].abs() > 1e-6),
         "solutions is not supposed to construct Python's flat split"
     );
 
