@@ -6,3 +6,4 @@ lean/.lake/*
 # evict the working one.
 /target-verify
 .pytest_cache/
+doc/Robot model.blend1
