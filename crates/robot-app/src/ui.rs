@@ -163,18 +163,44 @@ pub fn draw_shell(
     // The messagebox the reference raises inside its handlers (`simulator.py:673, 708, 821`).
     draw_notice(&mut root, &mut session);
 
-    let scale = window.scale_factor();
     viewport.points = central;
-    viewport.physical_position = UVec2::new(
-        (central.min.x * scale).round().max(0.0) as u32,
-        (central.min.y * scale).round().max(0.0) as u32,
-    );
-    viewport.physical_size = UVec2::new(
-        (central.width() * scale).round().max(0.0) as u32,
-        (central.height() * scale).round().max(0.0) as u32,
-    );
+    let (physical_position, physical_size) =
+        physical_viewport(central, window.scale_factor(), window.physical_size());
+    viewport.physical_position = physical_position;
+    viewport.physical_size = physical_size;
 
     Ok(())
+}
+
+/// The [`Camera::viewport`] rect for a logical one: both corners rounded into physical
+/// pixels, each held inside `target` — the window's own physical size, which is the size
+/// the frame renders into.
+///
+/// Rounding the origin and the size separately, as this used to, cannot promise that the
+/// rect fits: each rounding can carry an edge half a pixel outward, and the logical rect
+/// egui lays out is measured against the window as Bevy last handed it to egui, which after
+/// a resize is a frame behind the size the frame renders into. Either one leaves the rect
+/// hanging off the render target by a pixel, and wgpu validates a camera viewport against
+/// the target's extent rather than clipping it — the frame is aborted and Bevy quits the
+/// app. `main.rs` clamps again where the viewport is applied, for the frames the UI pass
+/// has not measured yet.
+///
+/// [`Camera::viewport`]: bevy::camera::Camera::viewport
+fn physical_viewport(points: egui::Rect, scale: f32, target: UVec2) -> (UVec2, UVec2) {
+    // A NaN or a negative coordinate floors to zero rather than wrapping, and the clamp
+    // also catches the `as u32` saturation a wild coordinate would hit.
+    let corner = |x: f32, y: f32| {
+        UVec2::new(
+            (x * scale).round().max(0.0) as u32,
+            (y * scale).round().max(0.0) as u32,
+        )
+        .min(target)
+    };
+    let origin = corner(points.min.x, points.min.y);
+    let far = corner(points.max.x, points.max.y);
+    // An inverted rect, or one the target holds none of, comes back with a zero size, which
+    // `main.rs` reads as "leave the camera viewport alone".
+    (origin, far.saturating_sub(origin))
 }
 
 /// The 3D view's side panel: the camera controls, then `simulator.py:229-277`'s jog panel.
@@ -813,6 +839,59 @@ mod tests {
         assert!(roll.abs() < 1e-9, "roll {roll}");
         assert!((pitch - 90.0).abs() < 1e-9, "pitch {pitch}");
         assert!((yaw + 15.0).abs() < 1e-9, "yaw {yaw}");
+    }
+
+    #[test]
+    fn physical_viewport_rounds_both_corners_at_a_whole_scale() {
+        // At 100% display scale a point is a pixel: the rect comes back as written.
+        let points = egui::Rect::from_min_max(egui::pos2(240.0, 39.0), egui::pos2(1120.0, 699.0));
+        let (position, size) = physical_viewport(points, 1.0, UVec2::new(1120, 760));
+        assert_eq!(position, UVec2::new(240, 39));
+        assert_eq!(size, UVec2::new(880, 660));
+    }
+
+    #[test]
+    fn physical_viewport_holds_a_fractional_scale_inside_the_window() {
+        // The crash this was written for. A maximized 1920x1111 window at 125%, a top strip
+        // 31.2 points tall, and a 3D view reaching to 889.6 — the last row of a layout
+        // measured against the window as it stood a frame earlier, one row past the 1111
+        // this frame renders into. Both edges land exactly (31.2 and 858.4 points are 39
+        // and 1073 pixels), so the viewport asks for row 1112 of a target 1111 rows tall.
+        let points = egui::Rect::from_min_max(egui::pos2(0.0, 31.2), egui::pos2(1536.0, 889.6));
+        let (position, size) = physical_viewport(points, 1.25, UVec2::new(1920, 1111));
+        assert_eq!(position, UVec2::new(0, 39));
+        assert_eq!(size, UVec2::new(1920, 1072));
+        assert_eq!(position.y + size.y, 1111);
+
+        // The same layout against the window it was restored to: a rect overhanging both
+        // axes comes back trimmed on each one, which is the shape the live crash took.
+        let (position, size) = physical_viewport(points, 1.25, UVec2::new(1400, 950));
+        assert_eq!(position, UVec2::new(0, 39));
+        assert_eq!(size, UVec2::new(1400, 911));
+        assert_eq!(position.y + size.y, 950);
+    }
+
+    #[test]
+    fn physical_viewport_comes_back_empty_when_the_target_holds_none_of_it() {
+        // Panels stacked taller than a small window, an inverted rect, and a rect entirely
+        // past the window all have to read as "no viewport", which is what `main.rs` checks
+        // before it touches the camera.
+        let target = UVec2::new(1025, 750); // the reference's 820x600 minimum, at 125%
+        let cases = [
+            // Panels stacked taller than the window: the leftover rect starts below it.
+            egui::Rect::from_min_max(egui::pos2(0.0, 620.0), egui::pos2(800.0, 700.0)),
+            // An inverted rect, which `Rect` is free to hold and a caller could hand over.
+            egui::Rect::from_min_max(egui::pos2(0.0, 500.0), egui::pos2(0.0, 400.0)),
+            // A rect entirely past the window's right edge.
+            egui::Rect::from_min_max(egui::pos2(900.0, 0.0), egui::pos2(1200.0, 100.0)),
+        ];
+        for points in cases {
+            let (position, size) = physical_viewport(points, 1.25, target);
+            assert!(
+                size.x == 0 || size.y == 0,
+                "{points:?} -> {position:?} + {size:?}"
+            );
+        }
     }
 
     #[test]

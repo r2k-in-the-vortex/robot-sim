@@ -273,9 +273,15 @@ fn setup_cameras(mut commands: Commands) {
 /// under a camera that keeps pointing at it. The window is centered on the target by
 /// default, which is what makes those two agree with the reference's axis-limit edits
 /// (`simulator.py:1069-1116`).
+///
+/// The viewport is the leftover rect the UI pass measured ([`Viewport`]), held inside the
+/// window's own physical size on the way in: wgpu validates a camera viewport against the
+/// render target rather than clipping it, and this rect is a frame old by the time it gets
+/// here.
 fn update_camera(
     view: Res<ViewState>,
     viewport: Res<Viewport>,
+    window: Single<&Window, With<PrimaryWindow>>,
     mut camera: Single<(&mut Transform, &mut Projection, &mut Camera), With<SceneCamera>>,
 ) {
     let (transform, projection, camera) = &mut *camera;
@@ -284,9 +290,24 @@ fn update_camera(
     // A zero size is the first frame, before the UI has measured its panels: the camera
     // keeps the window-sized viewport it started with rather than a degenerate rect.
     if viewport.physical_size.x > 0 && viewport.physical_size.y > 0 {
-        camera.viewport = Some(CameraViewport {
-            physical_position: viewport.physical_position,
-            physical_size: viewport.physical_size,
+        // The rect was measured against the window as it stood when the UI pass laid its
+        // panels out, so a resize since then — a maximize, a restore, a drag — leaves it
+        // describing the old window for this frame. wgpu validates the viewport against
+        // the target this frame actually renders into and rejects a rect that overhangs it
+        // rather than clipping it, which quits the app; holding the rect inside the
+        // window's own size is what makes the stale frame harmless.
+        let target = window.physical_size();
+        let position = viewport.physical_position.min(target);
+        let far = viewport
+            .physical_position
+            .saturating_add(viewport.physical_size)
+            .min(target);
+        let size = far.saturating_sub(position);
+        // A rect the window holds none of — panels taller than a very small window — leaves
+        // the camera on the whole target rather than handing the renderer an empty viewport.
+        camera.viewport = (size.x > 0 && size.y > 0).then_some(CameraViewport {
+            physical_position: position,
+            physical_size: size,
             ..default()
         });
     }

@@ -55,7 +55,7 @@
   ],
   "meshes": [
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_01-1.STL",
       "offset": [
         0.0,
         0.0,
@@ -69,7 +69,7 @@
       "opacity": 1.0
     },
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_02-1.STL",
       "offset": [
         0.0,
         0.0,
@@ -83,7 +83,7 @@
       "opacity": 1.0
     },
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_03-1.STL",
       "offset": [
         0.0,
         0.0,
@@ -97,7 +97,7 @@
       "opacity": 1.0
     },
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_04-1.STL",
       "offset": [
         0.0,
         0.0,
@@ -111,7 +111,7 @@
       "opacity": 1.0
     },
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_05-1.STL",
       "offset": [
         0.0,
         0.0,
@@ -125,7 +125,7 @@
       "opacity": 1.0
     },
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_06-1.STL",
       "offset": [
         0.0,
         0.0,
@@ -139,7 +139,7 @@
       "opacity": 1.0
     },
     {
-      "path": "",
+      "path": "mesh/Robot c 4 a 601 s - c4-a601s_07-1.STL",
       "offset": [
         0.0,
         0.0,
