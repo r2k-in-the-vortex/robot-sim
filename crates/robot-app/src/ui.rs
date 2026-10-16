@@ -640,6 +640,29 @@ fn load_json(session: &mut Session, robot: &mut RobotState) {
     }
 }
 
+/// The mesh table's STL column, in points, on a page `available` points wide.
+///
+/// The reference makes this the table's one flexible column — `simulator.py:565` gives it
+/// `columnconfigure(1, weight=1)` against `sticky=tk.EW` entries (`:542`) — so it takes what
+/// the other nine columns leave. Two bounds keep that from turning into a nuisance at either
+/// end: the floor is the reference's own `width=24` box, and the ceiling is an absolute path,
+/// because the reference's uncapped `weight=1` strands the numeric columns on the far side of
+/// a maximized window.
+///
+/// It is a width for the whole table rather than one field because the table's fields are
+/// what a [`egui::Grid`] measures its columns from; see the call site in [`mesh_page`].
+fn stl_column_width(available: f32) -> f32 {
+    /// What the row's other nine columns take: the six 56-point numeric fields, the
+    /// 48-point opacity field, the `Browse…` button, the frame-name column and the nine
+    /// eight-point gaps. The button and the names are auto-sized, and are allowed for
+    /// generously here, so being a little off leaves the table short of the page's edge
+    /// rather than hanging off it.
+    const REST_OF_ROW: f32 = 6.0 * 56.0 + 48.0 + 150.0 + 9.0 * 8.0;
+    const MIN: f32 = 220.0;
+    const MAX: f32 = 420.0;
+    (available - REST_OF_ROW).clamp(MIN, MAX)
+}
+
 /// `simulator.py:510-573`.
 fn mesh_page(
     ui: &mut egui::Ui,
@@ -661,9 +684,16 @@ fn mesh_page(
     }
     ui.add_space(6.0);
 
+    // A grid hands each cell the width its column had last frame, so a `TextEdit` can never
+    // be the widget that widens its own column: the `STL file` heading above it holds the
+    // column at the heading's own width, which is what left the field a few characters wide.
+    // The cap below is what a cell may take; the fields then size to what they ask for,
+    // and the column follows its widest row.
+    let path_width = stl_column_width(ui.available_width());
     egui::Grid::new("mesh_table")
         .num_columns(10)
         .spacing([8.0, 4.0])
+        .max_col_width(path_width)
         .show(ui, |ui| {
             for heading in [
                 "Frame", "STL file", "", "Offset X", "Offset Y", "Offset Z", "Rot X", "Rot Y",
@@ -675,7 +705,7 @@ fn mesh_page(
 
             for (frame, form) in session.meshes.iter_mut().enumerate() {
                 ui.label(MESH_FRAME_NAMES[frame]);
-                ui.add(egui::TextEdit::singleline(&mut form.path).desired_width(220.0));
+                ui.add(egui::TextEdit::singleline(&mut form.path).desired_width(path_width));
                 if ui.button("Browse…").clicked() {
                     if let Some(path) = dialogs::pick_stl(&form.path) {
                         form.path = path.to_string_lossy().into_owned();
@@ -897,6 +927,18 @@ mod tests {
                 "{points:?} -> {position:?} + {size:?}"
             );
         }
+    }
+
+    #[test]
+    fn stl_column_takes_the_page_leftover_between_its_two_bounds() {
+        // A maximized 1920x1200 dev window at 125%: 1536 points of page, so the column is
+        // at its ceiling, which is a whole absolute path.
+        assert_eq!(stl_column_width(1536.0), 420.0);
+        // Mid-range: the page less the rest of the row, and nothing else.
+        assert_eq!(stl_column_width(900.0), 294.0);
+        // A page too small to hold the table at all — the 820-point minimum window, less
+        // its margins — keeps the reference's own box rather than collapsing.
+        assert_eq!(stl_column_width(300.0), 220.0);
     }
 
     #[test]
