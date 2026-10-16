@@ -30,6 +30,37 @@
 //! its rendering is taken at face value. Without that, applying an edit to one joint would
 //! quietly round the other five down to six digits. `test_kinematics.py:361` covers it.
 //!
+//! # A joint carries its winding
+//!
+//! The stored runtime angles are **continuous**: a joint jog accumulates
+//! (`joint_angles[joint_index] += direction * step`, `simulator.py:335`) and nothing folds the
+//! result back into a single turn, so J6 can sit at 400°. A solver's angles, by contrast, are
+//! defined modulo a full turn. A Cartesian jog therefore does two separate things with the
+//! candidate it picks: it *selects* it by wrapped distance
+//! ([`robot_kinematics::SolutionSet::nearest_to`], the reference's own metric and the right one
+//! there — a candidate a whole turn away is the same candidate), and then it *places* it beside
+//! the angles the arm is actually holding ([`robot_kinematics::Solution::representative_near`]),
+//! which is what keeps a jog from a wound joint a small move instead of a whole turn.
+//!
+//! **Divergence.** `simulator.py` does the first of those and not the second: it picks the
+//! nearest candidate and then stores the solver's angles verbatim, wrapped to `(-180°, 180°]`
+//! (`:392-396` through `_apply_joint_solution`'s `math.degrees`, `:343-353`). A pose jog from
+//! J6 = 400° therefore leaves J6 at 40° — the arm spins a whole turn. The placement is this
+//! module's departure from the reference, pinned by the test
+//! `a_pose_jog_keeps_the_winding_the_reference_discards`.
+//!
+//! # The index annotation
+//!
+//! Because a joint keeps its winding, the UI names it: once a runtime angle has reached a full
+//! turn either way, the front readout and the clipboard both annotate it with the whole turns
+//! it carries and the residual left over. Both read that from [`wound_turns`], which has the
+//! gate's reason and the residual's range, so the two cannot disagree. Inside ±360° the joint
+//! has not wound anything, nothing is annotated, and both print exactly as the reference does.
+//!
+//! The Parameters tab's joint-angle fields are deliberately *not* annotated: their text is what
+//! [`Session::read_joint_angles`] compares against `format_g(stored)` to resolve the
+//! display-precision split, so the plain rendering is load-bearing.
+//!
 //! # What is not here
 //!
 //! Runtime joint angles never reach the saved file: they have no JSON key, and
@@ -546,10 +577,13 @@ impl Session {
             // configuration it found rather than flipping the elbow or the shoulder.
             //
             // The reference compares *runtime* radians and this compares totals; the two
-            // differ by the joint's static offset, which cancels in the subtraction
-            // (`wrapped_distance_sq` wraps the difference, so a whole-turn discrepancy
-            // cannot matter either). Using the totals keeps the reference's own
-            // `total_angles_rad` as the single place the offset is applied.
+            // differ by the joint's static offset, which cancels in the subtraction. A
+            // whole-turn discrepancy cancels there too, and that is the point of this metric
+            // rather than a flaw in it: a candidate is defined modulo a full turn, so the
+            // candidate a turn away *is* the one the arm is holding. Selecting is all this
+            // step does. The turn it just ignored is the placement's to resolve, below.
+            // Using the totals keeps the reference's own `total_angles_rad` as the single
+            // place the offset is applied.
             let reference = robot_kinematics::Solution {
                 angles: parameters.total_angles_rad(&current),
                 shoulder: 1,
@@ -559,13 +593,22 @@ impl Session {
                 return Err(String::from(NO_SOLUTION));
             };
 
-            // Back to runtime degrees for the stored state, which is the change of variable
-            // `_apply_joint_solution` performs with `math.degrees` (`simulator.py:343-353`).
+            // **Divergence.** The reference stores what the solver returned, verbatim
+            // (`:396` through `_apply_joint_solution`'s `math.degrees`, `:343-353`), so a
+            // wound joint loses its whole turn: the issue's J6 at 400° comes back at 40° and
+            // the arm spins. `representative_near` places the chosen candidate beside the
+            // arm's own continuous angles instead, so the motion the jog implies is the
+            // at-most-half-turn wrapped difference and the winding survives. See the module
+            // docs for why the selection above is still the reference's.
+            let placed = chosen.representative_near(&reference);
+            // Back to runtime degrees for the stored state: the reference's change of
+            // variable, with the offset coming back off *without* a wrap, because `placed` is
+            // already the representative beside the joint.
             let solved = core::array::from_fn(|joint| {
-                units::rad_to_deg(units::runtime_angle(
-                    chosen.angles[joint],
-                    parameters.joints[joint].theta_offset_deg,
-                ))
+                units::rad_to_deg(
+                    placed.angles[joint]
+                        - units::deg_to_rad(parameters.joints[joint].theta_offset_deg),
+                )
             });
             self.apply_joint_solution(&parameters, &solved, document, angles);
             Ok(describe(step))
@@ -594,6 +637,11 @@ impl Session {
     /// Fifteen lines, `%.15g` on every number, and no trailing newline — the reference joins
     /// with `"\n"`. The pose comes from the *applied* table and the *stored* angles, so the
     /// button copies what is on screen rather than what is typed.
+    ///
+    /// The joint-angle lines carry the winding annotation — `J6: 400  (index 1 + 40°)` — once
+    /// the joint has one; inside ±360° a line is the reference's own, `J6: 40`. The
+    /// decomposition and the gate are [`wound_turns`]'s, so this and the front readout cannot
+    /// disagree about them.
     pub fn copy_xyz_text(
         parameters: &DHParameters,
         runtime_deg: &[f64; JOINT_COUNT],
@@ -615,7 +663,21 @@ impl Session {
             String::from("Runtime joint angles (degrees):"),
         ];
         for (index, angle) in runtime_deg.iter().enumerate() {
-            lines.push(format!("J{}: {}", index + 1, value(*angle)));
+            lines.push(match wound_turns(*angle) {
+                // The residual's sign is written here rather than left to `%g`, because the
+                // magnitude is printed unsigned: a residual of `-40` is `- 40`, and every
+                // other case is `+`. The two spaces before the paren separate the annotation
+                // from the number it annotates, and the `°` closes it.
+                Some((turns, residual)) => format!(
+                    "J{}: {}  (index {} {} {}°)",
+                    index + 1,
+                    value(*angle),
+                    turns,
+                    if residual < 0.0 { '-' } else { '+' },
+                    value(residual.abs())
+                ),
+                None => format!("J{}: {}", index + 1, value(*angle)),
+            });
         }
         Ok(lines.join("\n"))
     }
@@ -687,6 +749,48 @@ impl Session {
     /// Queue a messagebox, `messagebox.showinfo`/`showerror`.
     pub fn show_notice(&mut self, title: &'static str, message: impl Into<String>) {
         self.notice = Some(Failure::new(title, message));
+    }
+}
+
+/// The whole turns a runtime angle carries and the residual it leaves, or `None` when the
+/// joint has not wound a turn and the annotation is hidden.
+///
+/// The turns are [`robot_kinematics::turn_index`]'s: the whole turns the angle's nearest
+/// decomposition carries, so it is the winding the joint actually holds and not the quotient
+/// of any rounding of this function's own. The residual is what the angle is beside that whole
+/// turn, `angle_deg - 360 · turns`, which is the wrapped-style value in `(-180°, 180°]`: `541`
+/// is `idx 2 - 179°` — two turns short of 179 degrees — and `-400` is `idx -1 - 40°`.
+///
+/// **The gate is the magnitude, not `turns != 0`.** `turn_index` names the nearest
+/// decomposition, so it is already ±1 at `359.9°` — an angle well inside a single turn, whose
+/// decomposition would be one turn *minus* a tenth of a degree — and annotating there would
+/// print an index beside a joint that has not wound anything. What the annotation is about is
+/// the winding the joint actually holds, which begins at a full turn, so the gate is
+/// `|angle| >= 360`. Angles inside that, `359`, `-179`, `200`, print exactly as the reference
+/// prints them.
+///
+/// Total, like the `turn_index` it calls: a non-finite angle has no winding to name and is
+/// hidden rather than annotated — unreachable from the stored angles, which every reader
+/// requires to be finite, but this is a display path and a display path must not have to be
+/// sure.
+pub fn wound_turns(angle_deg: f64) -> Option<(i32, f64)> {
+    let magnitude = angle_deg.abs();
+    if !magnitude.is_finite() || magnitude < 360.0 {
+        return None;
+    }
+    let turns = robot_kinematics::turn_index(units::deg_to_rad(angle_deg));
+    Some((turns, angle_deg - 360.0 * f64::from(turns)))
+}
+
+/// The front readout's label for one runtime angle: the reference's `f"{angle:.1f}°"`
+/// (`_sync_joint_angle_views`, `simulator.py:325`), and the winding annotation beside it once
+/// [`wound_turns`] says the joint has one — `400.0°  idx 1`, two spaces before the `idx`.
+///
+/// The Parameters tab's joint-angle fields are not labelled this way; see the module docs.
+pub fn front_readout(angle_deg: f64) -> String {
+    match wound_turns(angle_deg) {
+        Some((turns, _residual)) => format!("{angle_deg:.1}°  idx {turns}"),
+        None => format!("{angle_deg:.1}°"),
     }
 }
 
@@ -1115,6 +1219,258 @@ mod tests {
         );
     }
 
+    // --- a joint carries its winding (issue #1, "Feature: over 360deg indexing") ---------
+
+    #[test]
+    fn wound_turns_names_the_turns_and_the_residual() {
+        // The decomposition the readout and the clipboard share: whole turns, and what the
+        // angle is beside them. The residual is the wrapped-style value in `(-180°, 180°]`,
+        // so 541 is two turns *short* of 179 degrees rather than 181 past one, and the sign
+        // of the winding is the joint's own.
+        assert_eq!(wound_turns(400.0), Some((1, 40.0)));
+        assert_eq!(wound_turns(-400.0), Some((-1, -40.0)));
+        assert_eq!(wound_turns(360.0), Some((1, 0.0)));
+        assert_eq!(wound_turns(-360.0), Some((-1, 0.0)));
+        assert_eq!(wound_turns(720.0), Some((2, 0.0)));
+        assert_eq!(wound_turns(-1080.0), Some((-3, 0.0)));
+        assert_eq!(wound_turns(541.0), Some((2, -179.0)));
+        assert_eq!(wound_turns(-541.0), Some((-2, 179.0)));
+    }
+
+    #[test]
+    fn the_annotation_gate_is_the_full_turn_not_the_turn_index() {
+        // `turn_index` names the *nearest decomposition*, so it is already 1 at 359.9 — a
+        // joint well inside a single turn, one tenth of a degree short of the boundary. The
+        // annotation is about the winding a joint actually holds, so the gate is `|angle| >=
+        // 360` and 359.9 is silent. This is the whole reason the two are not the same test.
+        assert_eq!(robot_kinematics::turn_index(units::deg_to_rad(359.9)), 1);
+        assert_eq!(wound_turns(359.9), None);
+
+        for angle in [359.0, -179.0, 200.0, 0.0, -359.9] {
+            assert_eq!(wound_turns(angle), None, "{angle} has not wound a turn");
+            // And the readout is exactly the reference's: `f"{angle:.1f}°"`, no annotation.
+            assert_eq!(front_readout(angle), format!("{angle:.1}°"));
+        }
+        // A non-finite angle has no winding to name; the display path hides it rather than
+        // annotating `idx 0` beside a NaN.
+        assert_eq!(wound_turns(f64::NAN), None);
+        assert_eq!(wound_turns(f64::INFINITY), None);
+    }
+
+    #[test]
+    fn a_joint_inside_a_single_turn_copies_without_an_annotation() {
+        // The clipboard inside ±360 is the reference's own line, digit for digit: the gate is
+        // the same one the readout uses, so the button copies what the window shows.
+        let document = Document::shipped();
+        let text =
+            Session::copy_xyz_text(&document.parameters, &[359.0, -179.0, 200.0, 0.0, 0.0, 0.0])
+                .expect("shipped");
+        let lines: Vec<&str> = text.split('\n').collect();
+        assert_eq!(lines[9], "J1: 359");
+        assert_eq!(lines[10], "J2: -179");
+        assert_eq!(lines[11], "J3: 200");
+        assert_eq!(lines[12], "J4: 0");
+        assert_eq!(lines[13], "J5: 0");
+        assert_eq!(lines[14], "J6: 0");
+    }
+
+    /// Issue #1's exact scenario, end to end at the session level: J1..J5 at zero and J6
+    /// wound to 400 degrees, then `Jog X+ 1 unit`. The tool moves the unit it was asked for
+    /// and the arm does not spin — J6 is still at 400, not at the 40 the reference lands on.
+    #[test]
+    fn a_pose_jog_from_a_wound_joint_moves_the_tool_without_spinning_the_joint() {
+        let (mut session, mut document, mut angles) = session();
+        angles[5] = 400.0;
+        session.sync_joint_angles(&angles);
+        let started = angles;
+        let before = tool_pose_of(&document, &angles);
+        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        let after = tool_pose_of(&document, &angles);
+
+        assert_eq!(session.status, "Moved base X +1");
+        assert!(
+            (after.p.x() - before.p.x() - 1.0).abs() < 1e-9,
+            "the tool moved {} along X, not the 1 unit the button asked for",
+            after.p.x() - before.p.x()
+        );
+        assert!(
+            (after.p.y() - before.p.y()).abs() < 1e-9 && (after.p.z() - before.p.z()).abs() < 1e-9,
+            "the jog moved the tool off the X axis: {after:?} against {before:?}"
+        );
+
+        // The joint the issue is about. 400 degrees is a whole turn from the solver's 40, and
+        // `40` is precisely what the reference stores here — the stored angle must not be it.
+        assert!(
+            (angles[5] - 400.0).abs() < 1e-9,
+            "J6 was stored as {} instead of the 400 it was holding",
+            angles[5]
+        );
+
+        // The other five joints reproduce the issue's own measured values, so they are pinned
+        // as measured: `J2 ~= -2.29246114057628, J3 ~= 2.3383168530017,
+        // J5 ~= 0.0458557124254265` (J1 = 0 and J4 = -1.4e-14, which is zero at this scale).
+        for (joint, measured) in [
+            (0, 0.0),
+            (1, -2.292_461_140_576_28),
+            (2, 2.338_316_853_001_7),
+            (3, -1.403_341_859_706_98e-14),
+            (4, 0.045_855_712_425_426_5),
+        ] {
+            assert!(
+                (angles[joint] - measured).abs() < 1e-6,
+                "J{} is {} after the jog, not the issue's {measured}",
+                joint + 1,
+                angles[joint]
+            );
+        }
+
+        // And the whole point of the placement: no joint took a half-turn hop, so the motion
+        // the jog implies is the small one the step size asked for.
+        for (joint, (angle, was)) in angles.iter().zip(started.iter()).enumerate() {
+            assert!(
+                (angle - was).abs() < 180.0,
+                "J{} moved from {was} to {angle}, more than a half turn",
+                joint + 1
+            );
+        }
+    }
+
+    /// The same wound angle seen by the two annotating views: the front readout under the jog
+    /// buttons and the `Copy XYZ` line. Both read the decomposition from [`wound_turns`], so
+    /// they name the same turn, and the five joints inside ±360 print exactly as the
+    /// reference prints them.
+    #[test]
+    fn a_wound_joint_is_annotated_the_same_way_on_the_readout_and_the_clipboard() {
+        let (mut session, mut document, mut angles) = session();
+        angles[5] = 400.0;
+        session.sync_joint_angles(&angles);
+        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+
+        assert_eq!(front_readout(angles[5]), "400.0°  idx 1");
+
+        let text = Session::copy_xyz_text(&document.parameters, &angles).expect("shipped");
+        let lines: Vec<&str> = text.split('\n').collect();
+        assert_eq!(lines[14], "J6: 400  (index 1 + 40°)");
+        // The five unwound lines are the reference's, with no annotation anywhere in them.
+        assert_eq!(lines[9], "J1: 0");
+        assert_eq!(lines[10], "J2: -2.29246114057628");
+        assert_eq!(lines[11], "J3: 2.3383168530017");
+        assert_eq!(lines[12], "J4: -1.40334185970698e-14");
+        assert_eq!(lines[13], "J5: 0.0458557124254265");
+        for line in &lines[9..14] {
+            assert!(!line.contains("index"), "{line} should not be annotated");
+        }
+    }
+
+    /// The winding backwards is the same story: a joint held at -400 degrees and jogged in X
+    /// stays at -400 and keeps its `idx -1` annotation, rather than snapping to -40.
+    #[test]
+    fn a_negative_winding_survives_a_pose_jog_and_keeps_its_annotation() {
+        let (mut session, mut document, mut angles) = session();
+        angles[5] = -400.0;
+        session.sync_joint_angles(&angles);
+        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+
+        assert_eq!(session.status, "Moved base X +1");
+        assert!(
+            (angles[5] + 400.0).abs() < 1e-9,
+            "J6 was stored as {}, not the -400 it was holding",
+            angles[5]
+        );
+        let (turns, residual) = wound_turns(angles[5]).expect("a wound joint is annotated");
+        assert_eq!(turns, -1, "the joint wound the other way: {angles:?}");
+        assert!(
+            (residual + 40.0).abs() < 1e-9,
+            "the residual is {residual}, not -40"
+        );
+        assert_eq!(front_readout(angles[5]), "-400.0°  idx -1");
+    }
+
+    /// Just short of a full turn, and a jog that crosses it. The placement lands the joint
+    /// just past 360 — a fifth of a degree of motion — rather than at the 0.1 the solver
+    /// returned, which the reference's wrap would have taken as a whole turn backwards.
+    #[test]
+    fn a_jog_across_the_turn_boundary_moves_a_fraction_of_a_degree() {
+        let (mut session, mut document, mut angles) = session();
+        session.rotation_step = String::from("0.2");
+        angles[5] = 359.9;
+        session.sync_joint_angles(&angles);
+        session.jog_rotation_tool(Axis::Z, 1, &mut document, &mut angles);
+
+        assert_eq!(session.status, "Rotated tool RZ +0.2 deg");
+        assert!(
+            (angles[5] - 360.1).abs() < 1e-9,
+            "J6 crossed to {}, not just past the 360 boundary",
+            angles[5]
+        );
+        let motion = angles[5] - 359.9;
+        assert!(
+            motion > 0.0 && motion < 1.0,
+            "crossing the boundary moved the joint {motion} degrees, not a fraction of one"
+        );
+        assert_eq!(
+            wound_turns(angles[5]).map(|(turns, _)| turns),
+            Some(1),
+            "a joint just past 360 carries one turn"
+        );
+        assert_eq!(front_readout(angles[5]), "360.1°  idx 1");
+    }
+
+    /// The two ways a joint gets wound agree with each other, which is the regression in
+    /// miniature: the joint jog is where the winding comes from (`simulator.py:335`), and the
+    /// Cartesian jog must not take it away.
+    #[test]
+    fn a_joint_jogged_past_a_turn_keeps_its_winding_through_a_pose_jog() {
+        let (mut session, mut document, mut angles) = session();
+        session.joint_step = String::from("400");
+        session.jog_joint(5, 1, &mut document, &mut angles);
+        assert_eq!(session.status, "Jogged J6 +400 deg");
+        assert_eq!(
+            angles[5], 400.0,
+            "a joint jog accumulates, it does not wrap"
+        );
+
+        session.jog_step = String::from("1");
+        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        assert_eq!(session.status, "Moved base X +1");
+        assert!(
+            (angles[5] - 400.0).abs() < 1e-9,
+            "the pose jog moved J6 to {}, the winding the joint jog produced",
+            angles[5]
+        );
+    }
+
+    /// **The divergence, pinned.** `_pose_jog` picks the nearest candidate and then stores the
+    /// solver's angles verbatim (`simulator.py:392-396` through `_apply_joint_solution`'s
+    /// `math.degrees`, `:343-353`), so the reference's joint ends at the wrapped angle. This
+    /// app places the same candidate beside the arm's own continuous angle instead, and
+    /// nothing but the whole turn differs: the joint is in the same place, the arm has not
+    /// spun, and the turn is what the index annotation reports.
+    #[test]
+    fn a_pose_jog_keeps_the_winding_the_reference_discards() {
+        let (mut session, mut document, mut angles) = session();
+        angles[5] = 400.0;
+        session.sync_joint_angles(&angles);
+        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+
+        assert_eq!(session.status, "Moved base X +1");
+        // What the reference would have stored: the wrapped angle, 40 degrees.
+        assert!(
+            (units::wrap_angle(units::deg_to_rad(angles[5])) - units::deg_to_rad(40.0)).abs()
+                < 1e-9,
+            "the placed angle {} is not the same configuration as the reference's 40 degrees",
+            angles[5]
+        );
+        // What this stores: the same configuration, the whole turn further round, where the
+        // joint actually is.
+        assert!(
+            (angles[5] - 400.0).abs() < 1e-9,
+            "the divergence is supposed to be the whole turn, and {} is not 400",
+            angles[5]
+        );
+        assert_eq!(wound_turns(angles[5]).map(|(turns, _)| turns), Some(1));
+    }
+
     #[test]
     fn an_unreachable_target_leaves_the_arm_alone() {
         // `_pose_jog` refuses the whole move when the solve comes back empty
@@ -1153,22 +1509,27 @@ mod tests {
     fn a_pose_jog_stays_on_the_branch_it_started_on() {
         // The reason for the nearest-branch rule: without it a jog can flip the elbow or
         // the shoulder, which is a different configuration of the same pose and a jump on
-        // screen. Walking a few steps must not.
+        // screen. Walking a few steps must not, and the assertion is about the continuous
+        // values the arm holds: each step moves every joint a little, and a joint that had
+        // hopped branches would show it as a step of up to a half turn.
         let (mut session, mut document, mut angles) = session();
         session.jog_step = String::from("0.5");
-        for _ in 0..10 {
+        let mut previous = angles;
+        for step in 0..10 {
             session.jog_cartesian(Axis::Z, -1, &mut document, &mut angles);
             assert_eq!(session.status, "Moved base Z -0.5");
+            for (joint, (angle, was)) in angles.iter().zip(previous.iter()).enumerate() {
+                // The measured steps here are a degree or two; a branch flip is a half turn.
+                assert!(
+                    (angle - was).abs() < 90.0,
+                    "step {step}: J{} hopped from {was} to {angle}, a branch flip",
+                    joint + 1
+                );
+            }
+            previous = angles;
         }
-        // Ten half-unit steps down from zero: the arm has moved, and no joint has taken a
-        // near-half-turn hop.
+        // Ten half-unit steps down from zero: the arm has moved.
         assert!(angles.iter().any(|angle| angle.abs() > 0.5));
-        for (joint, angle) in angles.iter().enumerate() {
-            assert!(
-                angle.abs() < 180.0,
-                "joint {joint} hopped to {angle}, a branch flip"
-            );
-        }
     }
 
     #[test]
@@ -1191,17 +1552,15 @@ mod tests {
     #[test]
     fn the_angles_a_pose_jog_stores_are_runtime_angles_at_full_precision() {
         // The stored state is runtime degrees, so joint 2's 90 degree static offset has to
-        // come back off the totals the solver works in.
+        // come back off the totals the solver works in. There is no "and they are inside
+        // ±180" pin here: a joint that has wound a turn keeps it, and
+        // `a_pose_jog_keeps_the_winding_the_reference_discards` pins that instead.
         let (mut session, mut document, mut angles) = session();
         session.jog_cartesian(Axis::Y, 1, &mut document, &mut angles);
         let totals = document.parameters.total_angles_rad(&angles);
         let geometry = document.parameters.geometry().expect("shipped");
         let tool = fk(&geometry, &totals);
         assert_eq!(tool.p.x(), fk(&geometry, &totals).p.x());
-        assert!(
-            angles.iter().all(|angle| angle.abs() < 180.0),
-            "{angles:?} should be wrapped runtime angles"
-        );
         // Every field renders its stored angle, so the split round-trips through the fields.
         assert_eq!(
             session.read_joint_angles(&angles).expect("valid fields"),

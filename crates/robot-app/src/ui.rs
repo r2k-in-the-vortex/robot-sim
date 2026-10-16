@@ -301,10 +301,13 @@ fn view_controls(
                             );
                         }
                     });
-                    // `_sync_joint_angle_views`'s front readout (`simulator.py:325`).
+                    // `_sync_joint_angle_views`'s front readout (`simulator.py:325`), plus the
+                    // winding annotation once the joint has wound a whole turn.
                     ui.label(
-                        egui::RichText::new(format!("{:.1}°", robot.runtime_angles_deg[joint]))
-                            .small(),
+                        egui::RichText::new(session::front_readout(
+                            robot.runtime_angles_deg[joint],
+                        ))
+                        .small(),
                     );
                 });
             }

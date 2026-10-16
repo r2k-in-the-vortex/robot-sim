@@ -70,7 +70,8 @@ pub use pose::Pose;
 pub use scalar::{Field, Scalar};
 pub use solution::{MAX_SOLUTIONS, Solution, SolutionSet};
 pub use units::{
-    FRAME_COUNT, JOINT_COUNT, deg_to_rad, rad_to_deg, runtime_angle, total_angle, wrap_angle,
+    FRAME_COUNT, JOINT_COUNT, deg_to_rad, nearest_representative, rad_to_deg, runtime_angle,
+    total_angle, turn_index, wrap_angle,
 };
 pub use vec3::Vec3;
 pub use zyz::{

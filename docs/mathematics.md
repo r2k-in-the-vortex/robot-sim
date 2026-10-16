@@ -319,6 +319,67 @@ forward kinematics before it is returned, so a target that no branch
 reproduces, such as an unreachable position or an orientation inconsistent
 with the position, yields no solution rather than an approximate one.
 
+### Choosing the representative: the rotation index
+
+A pose fixes each joint angle only modulo a full turn, and everything above is written that
+way. The chain reads $\theta_i$ through $\cos\theta_i$ and $\sin\theta_i$ alone — no entry of
+the DH matrix depends on the angle in any other way — so replacing $\theta_i$ by
+$\theta_i + 2\pi k$, for an integer $k$, leaves every transform and the end-effector pose
+exactly where they were. `fk_congr` in `lean/Kinematics.lean` is that statement for the whole
+chain, `dh_congr` for one joint at a time, and it is why the completeness half of the next
+section states its recovered angles as equalities in `Real.Angle` — the reals modulo the full
+turns — rather than in $\mathbb{R}$: over $\mathbb{R}$ the claim would simply be false.
+
+So the solver answers in that quotient, and what it returns is not yet a joint command. The
+joint on the arm is not in the quotient. It is a shaft with a measured rotation: it
+accumulates whatever jogs it has been given, and after a few of them it sits wherever they
+left it, several turns from zero. Choosing which representative of the solved angle to send
+is therefore part of driving the joint, and no pose can make the choice on the driver's
+behalf — every representative describes the same pose.
+
+For a control loop the right choice is the representative nearest the joint's current angle
+$r$. Of the representatives $\theta + 2\pi k$ of a solved angle $\theta$, send
+
+$$
+\operatorname{nearest}(\theta; r) = r + \operatorname{wrap}(\theta - r) .
+$$
+
+The motion this implies is exactly $\operatorname{wrap}(\theta - r)$, which lies in
+$(-\pi, \pi]$: at most a half turn, whatever the joint's current winding, and never a whole
+turn in either direction — the joint can neither lose a turn nor invent one. That is the
+guarantee an over-360° jog needs. Sending the canonical representative
+$\operatorname{wrap}\theta$ instead pays no attention to where the joint is, and the error is
+the winding it dropped: a solver answer of $40^\circ$ sent to a joint held at $400^\circ$
+spins the full turn between them, a whole-turn joint motion produced by a jog of a fraction
+of a turn — the observed spin this section exists to rule out.
+
+The whole turns the nearest representative carries have a name. Every angle decomposes as
+
+$$
+\theta = k \cdot 2\pi + \operatorname{wrap}\theta,
+\qquad
+k = \operatorname{round}\!\left(\frac{\theta - \operatorname{wrap}\theta}{2\pi}\right),
+$$
+
+the *rotation index* of $\theta$: positive for an angle wound forwards past a full turn,
+negative the other way, and zero exactly on $\operatorname{wrap}$'s own range $(-\pi, \pi]$.
+The index is read off the difference $\theta - \operatorname{wrap}\theta$, a whole number of
+turns by construction, rather than off $\theta$ alone: a direct formula such as
+$\lfloor(\theta + \pi)/2\pi\rfloor$ mis-assigns the turns at $\theta \equiv \pi$, where the
+half turn is already the representative — the range's upper end is closed — and subtracting
+the representative first is what makes that boundary disappear. In `lean/Atan2.lean` the
+placement is `nearestRepresentative`, the index is `turnIndex`, and the theorems are
+`turnIndex_spec` (the decomposition above), `wrap_sub_turnIndex_mem` (the same identity read
+the other way), `nearestRepresentative_coe_angle` (the choice is invisible to the chain,
+`fk_congr` read a second time) and `nearestRepresentative_sub_le` — **no other representative
+of $\theta$ moves the joint less** than the one placed, so the choice is canonical rather than
+a convention.
+
+This is a representation, not a constraint. Nothing above forbids a joint from sitting past a
+full turn — that is the case the index exists for — and it supplies no joint limits: those
+remain the caller's to impose, as the scope paragraph below says. The index says where on its
+winding the joint already is, not how far it is allowed to go.
+
 ### What the specification proves
 
 The closed form above is a formal specification in
