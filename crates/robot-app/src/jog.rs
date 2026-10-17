@@ -30,6 +30,16 @@
 //! rejects anything but a positive finite number before any of this runs. A non-finite
 //! distance or angle passed here propagates NaN through the pose rather than being
 //! stopped, so the caller must validate first; these functions never panic.
+//!
+//! # Naming a button
+//!
+//! The panel has fourteen jog buttons, and every one of them means the same thing whether it
+//! is clicked once or held down ([`crate::session`] drives both modes through one path).
+//! [`JogTarget`] is that meaning as a value: one of the four pose jogs below, or one joint.
+//! The split matters because a pose jog needs the geometry and the solver while a joint jog
+//! needs neither — a table the pose jogs refuse can still be joint-jogged — so
+//! [`PoseJog::offset`] and the joint arithmetic are never mixed up, and the panel builds the
+//! same target from the same `(frame, rotating, axis)` triple it uses for the label.
 
 use robot_kinematics::{Mat3, Pose, Vec3};
 
@@ -75,6 +85,104 @@ impl Axis {
     pub fn from_index(index: usize) -> Option<Axis> {
         Axis::ALL.get(index).copied()
     }
+}
+
+/// Which frame a Cartesian jog acts in — the reference's two button groups,
+/// `simulator.py:251-256`.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum JogFrame {
+    Base,
+    Tool,
+}
+
+impl JogFrame {
+    /// The translation button of this group's `axis`, `simulator.py:280-296`.
+    pub const fn translation(self, axis: Axis) -> PoseJog {
+        match self {
+            JogFrame::Base => PoseJog::BaseTranslation(axis),
+            JogFrame::Tool => PoseJog::ToolTranslation(axis),
+        }
+    }
+
+    /// The rotation button of this group's `axis`, the row the reference prefixes with `R`.
+    pub const fn rotation(self, axis: Axis) -> PoseJog {
+        match self {
+            JogFrame::Base => PoseJog::BaseRotation(axis),
+            JogFrame::Tool => PoseJog::ToolRotation(axis),
+        }
+    }
+}
+
+/// The four pose jogs: a translation or a rotation, in one of the two frames.
+///
+/// The translation/rotation split is not cosmetic. A translation moves the pose's origin and a
+/// rotation leaves it exactly where it was, which the four functions below already say; and
+/// the two read different step fields (`jog_step` against `rotation_step`) and report
+/// different verbs ("Moved" against "Rotated").
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum PoseJog {
+    BaseTranslation(Axis),
+    ToolTranslation(Axis),
+    BaseRotation(Axis),
+    ToolRotation(Axis),
+}
+
+impl PoseJog {
+    /// The pose this jog produces `amount` away from `pose`.
+    ///
+    /// `amount` is a signed length for the translations and a signed **angle in degrees** for
+    /// the rotations, which is the unit both step fields, the status line and the held-button
+    /// rate all speak. The rotation arms convert after applying the sign, exactly as the
+    /// reference's `math.radians(direction * step)` does (`simulator.py:420`, `:429`).
+    pub fn offset(self, pose: &Pose<f64>, amount: f64) -> Pose<f64> {
+        match self {
+            PoseJog::BaseTranslation(axis) => offset_pose_translation(pose, axis, amount),
+            PoseJog::ToolTranslation(axis) => offset_pose_tool_translation(pose, axis, amount),
+            PoseJog::BaseRotation(axis) => rotate_pose_world_axis(pose, axis, amount.to_radians()),
+            PoseJog::ToolRotation(axis) => rotate_pose_tool_axis(pose, axis, amount.to_radians()),
+        }
+    }
+
+    /// Whether this jog turns the pose rather than moving it — the `R` in the button label, and
+    /// the field the amount is read from.
+    pub const fn rotates(self) -> bool {
+        matches!(self, PoseJog::BaseRotation(_) | PoseJog::ToolRotation(_))
+    }
+}
+
+/// One jog button's whole meaning: a pose jog or one joint.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum JogTarget {
+    Pose(PoseJog),
+    Joint(usize),
+}
+
+impl JogTarget {
+    /// The Cartesian button of `frame`'s group, `rotating` selecting the `R` row.
+    ///
+    /// The label and the target both come from this one `(frame, rotating, axis)` triple at
+    /// the call site, so the sign and the row a button advertises cannot drift from the jog it
+    /// performs.
+    pub const fn cartesian(frame: JogFrame, rotating: bool, axis: Axis) -> Self {
+        JogTarget::Pose(if rotating {
+            frame.rotation(axis)
+        } else {
+            frame.translation(axis)
+        })
+    }
+}
+
+/// Which of the two jog modes the panel's radio pair selects.
+///
+/// A field of [`crate::session::Session`] rather than a resource of its own: it is a jog
+/// control like the three step fields, and the handlers are what it steers.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum JogMode {
+    /// One click is one step — the reference's only mode (`simulator.py:399-433`).
+    #[default]
+    Step,
+    /// One second of holding a button is one step, measured from the press.
+    Continuous,
 }
 
 /// `_axis_rotation`, `simulator.py:95`.
@@ -395,5 +503,84 @@ mod tests {
         assert_eq!(Axis::ALL.map(Axis::letter), ['X', 'Y', 'Z']);
         assert_eq!(Axis::from_index(3), None);
         assert_eq!(Axis::from_index(usize::MAX), None);
+    }
+
+    /// [`PoseJog::offset`] is the four helpers the reference spells out, with each rotation's
+    /// signed amount converted to radians in the same place the handler converted it. The
+    /// comparison is bit for bit: this must not become arithmetic of its own.
+    #[test]
+    fn a_pose_jog_offsets_the_pose_the_way_its_helper_does() {
+        let pose = tool_pose(TEST_ANGLES);
+        for amount in [-2.5, 0.0, 0.5, 1.0] {
+            let cases: [(PoseJog, Pose<f64>); 4] = [
+                (
+                    PoseJog::BaseTranslation(Axis::X),
+                    offset_pose_translation(&pose, Axis::X, amount),
+                ),
+                (
+                    PoseJog::ToolTranslation(Axis::Y),
+                    offset_pose_tool_translation(&pose, Axis::Y, amount),
+                ),
+                (
+                    PoseJog::BaseRotation(Axis::Z),
+                    rotate_pose_world_axis(&pose, Axis::Z, amount.to_radians()),
+                ),
+                (
+                    PoseJog::ToolRotation(Axis::X),
+                    rotate_pose_tool_axis(&pose, Axis::X, amount.to_radians()),
+                ),
+            ];
+            for (jog, expected) in cases {
+                let actual = jog.offset(&pose, amount);
+                for row in 0..3 {
+                    for column in 0..3 {
+                        assert_eq!(
+                            actual.r.at(row, column).to_bits(),
+                            expected.r.at(row, column).to_bits(),
+                            "{jog:?} at {amount}: rotation entry ({row}, {column})"
+                        );
+                    }
+                    assert_eq!(
+                        actual.p[row].to_bits(),
+                        expected.p[row].to_bits(),
+                        "{jog:?} at {amount}: translation row {row}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A frame's two rows name the four pose jogs, and the `rotating` flag the panel builds
+    /// its target from is the same bit as the `R` it puts in the label.
+    #[test]
+    fn a_frame_builds_the_four_pose_jogs_it_carries() {
+        for axis in Axis::ALL {
+            assert_eq!(
+                JogFrame::Base.translation(axis),
+                PoseJog::BaseTranslation(axis)
+            );
+            assert_eq!(
+                JogFrame::Tool.translation(axis),
+                PoseJog::ToolTranslation(axis)
+            );
+            assert_eq!(JogFrame::Base.rotation(axis), PoseJog::BaseRotation(axis));
+            assert_eq!(JogFrame::Tool.rotation(axis), PoseJog::ToolRotation(axis));
+
+            for rotating in [false, true] {
+                let JogTarget::Pose(pose) = JogTarget::cartesian(JogFrame::Tool, rotating, axis)
+                else {
+                    panic!("a Cartesian button is a pose jog");
+                };
+                assert_eq!(pose.rotates(), rotating);
+                let label = crate::ui::jog_button_label(axis, -1, rotating);
+                assert_eq!(label.starts_with('R'), rotating, "{axis:?}: {label}");
+            }
+        }
+    }
+
+    /// The reference's mode is the default, so an upgrade does not change what a click does.
+    #[test]
+    fn the_default_mode_is_the_reference_one_step_per_click() {
+        assert_eq!(JogMode::default(), JogMode::Step);
     }
 }
