@@ -48,7 +48,10 @@ angle.
 The front readout shows the current T6 pose — the end effector's position and
 orientation. **Copy XYZ** puts the T6 position, its orientation as ZYX
 roll/pitch/yaw, and all six runtime joint angles on the clipboard at full
-precision.
+precision. A joint that has wound a full turn or more, in either direction,
+carries its turn index in the copied text as well — a J6 held at 400° copies as
+`J6: 400  (index 1 + 40°)` — while a joint inside ±360° copies exactly as
+before.
 
 ### Parameters tab
 
@@ -57,13 +60,14 @@ Two sub-tabs, **DH Parameters** and **Meshes**.
 **DH Parameters.** DH values are editable per joint. Angles are entered in
 degrees, while `d`, `a`, and mesh offsets use consistent model units. The DH
 table separates each joint's static theta offset from its runtime joint angle.
-Runtime angles start at zero each time the application launches; **Apply to
-View** uses offset plus runtime angle for forward kinematics. Saving stores only
-the static theta offset and link dimensions, never the runtime joint position.
-Solves run on the runtime angles at full precision; the joint angle fields and
-the front readouts render them rounded, and a field left untouched keeps its
-exact value when an edit elsewhere is applied. Older configuration files using
-`theta_deg` are read as static offsets.
+Runtime angles start at zero each time the application launches and are not
+folded back into a single turn; **Apply to View** uses offset plus runtime
+angle for forward kinematics. Saving stores only the static theta offset and
+link dimensions, never the runtime joint position. Solves run on the runtime
+angles at full precision; the joint angle fields and the front readouts render
+them rounded, and a field left untouched keeps its exact value when an edit
+elsewhere is applied. Older configuration files using `theta_deg` are read as
+static offsets.
 
 Independent coordinate-gizmo visibility checkboxes cover the base and J1–J6. All
 are visible by default, and their states are stored in `show_coordinate_gizmos`
@@ -105,6 +109,17 @@ current pose; it does not silently rotate the end effector.
 minus/plus buttons and a configurable joint-angle step. The displayed runtime
 angles stay synchronized with the Joint Angle fields in the Parameters tab;
 applying angle edits there also refreshes the front-screen readouts.
+
+A joint jog adds its step to the stored runtime angle and leaves the result
+unwrapped, so repeated jogs in one direction can carry a joint past a full
+turn instead of folding it back; J6 can sit at 400°, a whole turn further round
+than the 40° a solver reports for that joint. Once a joint has wound a full
+turn or more, in either direction, the front readout annotates the angle with
+the turns it carries — `400.0°  idx 1` — and **Copy XYZ** names the same turns
+in the clipboard text; a joint inside ±360° reads exactly as it does in the
+Python. A pose jog keeps that winding: the solved configuration is placed
+beside the angles the arm is holding, so a jog from a wound joint implies at
+most a half turn of motion rather than a whole turn back to its wrapped angle.
 
 ## Inverse kinematics
 
@@ -148,6 +163,7 @@ robot code of their own.
 | --- | --- | --- |
 | DH transform, frame chain, joint and tool positions | *Forward Kinematics with Denavit–Hartenberg Parameters* | `Kinematics.lean` |
 | Closed-form inverse solver | *Inverse kinematics* | `InverseKinematics.lean`, on `Zyz.lean` and `Atan2.lean` |
+| A solved angle's representative and rotation index | *Inverse kinematics* → *Choosing the representative: the rotation index* | `Atan2.lean` |
 | Wrench transport between frames | *Force/torque sensor dynamics* → *Frame changes* | `TorqueWrench.lean` |
 | Sensor measurement model and compensation | *Force/torque sensor dynamics* | `Dynamics.lean` |
 
@@ -238,7 +254,7 @@ node --test ".vscode/extensions/robot-arm-validations/test/*.test.js"
 
 ## Where the Rust deliberately differs from the Python
 
-Three changes are intentional rather than oversights, and all are visible.
+Four changes are intentional rather than oversights, and all are visible.
 
 **Mesh scale.** `simulator.py` applies no scale factor to the STL meshes at all,
 so the meshes and the DH table never actually lined up: the shipped meshes are in
@@ -266,3 +282,19 @@ changes. The bytes written are unaffected, apart from line endings:
 Python's `write_text` is text mode, so it turns the newlines into CRLF on Windows,
 while the Rust writes `json.dumps(data, indent=2) + "\n"` as-is. Both read either
 form back.
+
+**A pose jog keeps a wound joint's winding.** A solved angle is defined modulo a
+full turn, and the Python materialises that on the way back to the UI:
+`kinematics.py` wraps every angle its solver returns (`_wrap_angle(total -
+joint.theta)`, `:562`), and `_pose_jog` stores them as they come
+(`simulator.py:392-396`, through `_apply_joint_solution`'s `math.degrees`,
+`:343-353`). A joint on the arm carries no such equivalence: a joint jog
+accumulates (`joint_angles[joint_index] += direction * step`, `:335`) and J6 can
+sit at 400°, so the solver's 40° is that same joint a whole turn away — a
+Cartesian jog from it stores 40°, spinning the arm a full turn on a one-unit
+move. The Rust keeps the reference's selection of the candidate, because a
+candidate a whole turn away really is the configuration the arm is holding,
+and places the chosen one at the representatives nearest the angles the arm
+holds (`robot_kinematics::units::nearest_representative`). The implied motion
+is then at most a half turn, and the joint keeps the winding it had, which the
+readout names (see [Jogging](#jogging)).

@@ -127,8 +127,10 @@ The solver splits in two, and which half a theorem is about matters:
 | `wristSine`, `wristCosine`, `wristIsSingular` | `branch::WristPlan`, `zyz::hypot_third_column`, `zyz::cosine_third_entry` |
 | `wristReadTheta4/6`, `wristReadTheta6Flat` | `zyz::read_theta4/5/6`, `zyz::read_theta6_flat` |
 | `NonDegenerate` | `branch::Degeneracy` |
-| `Atan2.hypot`, `.atan2`, `.wrap` | `Scalar::hypot`, `Scalar::atan2`, `units::wrap_angle` |
-| `Real.Angle` equality (modulo a full turn) | `units::wrap_angle` on the difference |
+| `RealAtan2.hypot`, `.atan2`, `.wrap` | `Scalar::hypot`, `Scalar::atan2`, `units::wrap_angle` |
+| `Real.Angle` equality (modulo a full turn) | `units::wrap_angle` on the difference — the *canonical* representative of each angle; `units::nearest_representative` moves between the members the equality identifies and `units::turn_index` names how many turns apart they are |
+| `RealAtan2.nearestRepresentative` | `units::nearest_representative`, and `Solution::representative_near` for the lift from one angle to a whole configuration. **Argument order differs**: Lean is `(r a)` = (reference, angle), Rust `(angle, reference)` |
+| `RealAtan2.turnIndex` | `units::turn_index` (`ℤ` in Lean, `i32` in Rust; the saturating cast on a non-finite angle has no Lean counterpart, where every real has a winding) |
 
 | Theorem | Test |
 | --- | --- |
@@ -144,6 +146,18 @@ The solver splits in two, and which half a theorem is about matters:
 | `wristRotation_read_theta4/5/6_coe_angle` | `zyz::read_theta*` unit tests |
 | `wristRotation_zero_middle`, `_pi_middle` | `the_flat_branch_holds_joint_four_at_zero` |
 | the exact-predicate layer | `lean_branch_plans.rs`, compared `==` against `BranchDecisionQ.lean` |
+| `turnIndex_spec`, `wrap_sub_turnIndex_mem` | `units::turn_index_names_whole_turns` |
+| `nearestRepresentative_sub` | `units::placement_is_the_reference_plus_the_wrapped_difference` |
+| `abs_nearestRepresentative_sub_le_pi` | `units::a_placement_never_moves_further_than_a_half_turn` |
+| `nearestRepresentative_sub_le` | `units::a_placement_is_the_nearest_of_all_the_whole_turn_translates`, with `a_placement_never_moves_further_than_a_half_turn` as its `k = ±1` corollary |
+| `nearestRepresentative_coe_angle` | no Rust counterpart to test: `Real.Angle` has none — see 6 below |
+
+Not given separate tests, deliberately: `wrap_mem_Ioc` (the range `wrap` lands in),
+`exists_eq_wrap_add_int_mul_two_pi` (the decomposition the index is read off),
+`abs_le_abs_add_int_mul_two_pi` and `abs_wrap_le_abs_add_int_mul_two_pi` (the nearest
+representative is the least of its whole-turn translates). They are the internal steps the
+theorems above are proved from rather than separate laws of the model; the last two are
+`nearestRepresentative_sub_le`'s content in the two spellings its proof passes through.
 
 ### Where this is weaker, and it is said out loud
 
@@ -173,6 +187,19 @@ The solver splits in two, and which half a theorem is about matters:
    `solutions`/`solve` need `Scalar`. `Field` is open, which is what the exact `Ratio`
    corpus uses. Unblocking it means either implementing the type inside the crate behind a
    feature or opening the seal; neither was done here.
+6. **Two rows have no test that is the theorem itself.** `nearestRepresentative_coe_angle`
+   is structural: `Real.Angle` has no Rust counterpart, so what the Rust has instead is the
+   numerical shadow of it in
+   `units::placement_is_the_reference_plus_the_wrapped_difference` — placed and solved angles
+   agree to `1e-12` in what a pose can see, not exactly by construction. The pair
+   `turnIndex_spec` / `wrap_sub_turnIndex_mem` is exercised at a spread of angles where the
+   index is known (`units::turn_index_names_whole_turns`), not by recomputing the
+   decomposition identity there, which would be an `f64` equality and would need a tolerance
+   the Lean statement does not have. (`nearestRepresentative_sub_le` was the third and is no
+   longer among them: `units::a_placement_is_the_nearest_of_all_the_whole_turn_translates`
+   asserts `|placed − reference| ≤ |angle + 2πk − reference|` over `k ∈ [−7, 7]` directly, and
+   `units::a_placement_never_moves_further_than_a_half_turn` remains the `k = ±1` corollary
+   a jog actually meets.)
 
 ## Ground truth
 

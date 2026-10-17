@@ -219,6 +219,7 @@ Each of these is intentional, visible, and recorded in place.
 | **Save/Load open a chooser** | The Python writes beside the script; a compiled binary has no script directory |
 | **LF not CRLF on write** | Python's `write_text` is text mode and translates on Windows; the Rust writes the bytes Python's `json.dumps` would have produced |
 | **`Copy XYZ` raises on an invalid table** | The Python cannot fail there, since its `forward_kinematics` accepts any table |
+| **Pose jogs keep a joint's winding** | The Python stores the solver's angles as they come, wrapped into `(-180°, 180°]` (`_apply_joint_solution`'s `math.degrees`, `simulator.py:343-353`), so a J6 held at 400° comes back at 40° and the arm spins a whole turn. The Rust places the chosen candidate beside the angles the arm holds, and the readout and clipboard name the turns it carries |
 
 The JSON itself is **byte-identical** to `json.dumps(data, indent=2) + "\n"`, verified with
 `cmp` rather than asserted: 2216 bytes each way. Runtime joint angles are *structurally*
@@ -302,11 +303,15 @@ and scissors the egui pass to it. And `ATTRIBUTE_COLOR` is used verbatim as line
    `robot_parameters.json` carries no masses or inertias. Anything in that direction is new
    mathematics with no specification behind it, and should be its own decision.
 
-6. **The README's UI prose still describes the Python.** The three visible differences are
-   documented in a section of their own; the rest is inherited and is accurate for the
-   Python. It would be better rewritten against the Rust once someone has driven the
-   interface by hand — the agent that built it could not exercise dialogs or the clipboard
-   headlessly, so those two are the parts with the least evidence behind them.
+6. **The README's UI prose still describes the Python.** The four visible differences are
+   documented in a section of their own, and the Jogging and Copy XYZ paragraphs now name the
+   Rust's winding annotation as well; the rest is inherited and is accurate for the Python. It
+   would be better rewritten against the Rust once someone has driven the interface by hand —
+   the agent that built it could not exercise dialogs or the clipboard headlessly, so those
+   two are the parts with the least evidence behind them. The winding annotation has since
+   been driven by hand — J6 jogged to 400°, a one-unit X jog, the front readout and the
+   clipboard read back — so that path at least now has evidence behind it; the dialogs still
+   have none.
 
 ## If you are picking this up
 

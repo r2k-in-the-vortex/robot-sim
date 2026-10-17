@@ -19,9 +19,19 @@
 //! # Units
 //!
 //! [`Solution::angles`] are **total DH angles in radians**, the crate's convention
-//! everywhere. `kinematics.py` reports `wrap(total - offset)` instead; the conversion back
-//! to the UI's runtime degrees is [`robot_kinematics::units::runtime_angle`], which is a
-//! change of variable and not part of a solve.
+//! everywhere. `kinematics.py` reports `wrap(total - offset)` instead, and that change of
+//! variable is not part of a solve: it belongs to the caller, where the answer meets the arm
+//! and the table the jog was built from.
+//!
+//! [`robot_kinematics::units::runtime_angle`] is not what the pose jog uses to get there. It
+//! wraps, and wrapping is right only for *reporting* a configuration — a solver angle is
+//! defined modulo a full turn, an arm's joint is not, and a joint jog accumulates
+//! (`joint_angles[joint_index] += direction * step`, `simulator.py:335`). The jog instead
+//! places the chosen candidate beside the arm's own continuous angles
+//! ([`Solution::representative_near`]) and subtracts the offset without wrapping, so a joint
+//! at 400° stays at 400° rather than snapping to the solver's 40°. That divergence is
+//! `session.rs`'s to document; this module's boundary is only that the angles come back as
+//! totals.
 
 use robot_kinematics::{GeometryError, Pose, SolutionSet, Tolerances};
 use robot_model::{DHParameters, TableError};
@@ -286,6 +296,56 @@ mod tests {
             elbow: 1,
         };
         assert!(nearest.wrapped_distance_sq(&turned_reference) < 1e-14);
+
+        // The selection above is turn-blind by design, so the turn has to be put back before
+        // the arm is moved anywhere: `representative_near` is the other half of the pair, and
+        // it is what the pose jog calls once it has chosen (`session.rs`). Every joint lands
+        // at the reference — this candidate *is* the commanded configuration, so each of its
+        // angles is at worst a whole turn out — and joint 6 is the one that has a turn to
+        // keep: the solver's own representative wraps it to 0, the placement leaves it at 2π.
+        let placed = nearest.representative_near(&turned_reference);
+        for joint in 0..JOINT_COUNT {
+            assert!(
+                (placed.angles[joint] - turned_reference.angles[joint]).abs() < 1e-9,
+                "joint {} is {} after placement, not the reference's {}",
+                joint + 1,
+                placed.angles[joint],
+                turned_reference.angles[joint]
+            );
+        }
+        assert!(
+            units::rad_to_deg(placed.angles[5]).abs() > 359.0,
+            "joint 6 landed at {} degrees instead of keeping the whole turn",
+            units::rad_to_deg(placed.angles[5])
+        );
+
+        // The issue's own geometry (#1): a joint commanded to 400 degrees, where the solver
+        // answers inside a single turn at 40. Placing that answer beside the reference puts it
+        // back at 400 — the whole turn the selection ignores and the placement restores. The
+        // reference stores the 40 (`simulator.py:392-396`), which is the spin.
+        let mut wound = commanded;
+        wound[5] = 400.0;
+        let wound_reference = Solution {
+            angles: totals(&wound),
+            shoulder: 1,
+            elbow: 1,
+        };
+        let wound_solutions =
+            solve(&DHParameters::shipped(), &pose_at(&wound)).expect("shipped table");
+        let wound_nearest = wound_solutions
+            .nearest_to(&wound_reference)
+            .expect("non-empty");
+        assert!(
+            (units::rad_to_deg(wound_nearest.angles[5]) - 40.0).abs() < 1e-6,
+            "the solver answers joint 6 at {} degrees, not inside a single turn",
+            units::rad_to_deg(wound_nearest.angles[5])
+        );
+        let placed_wound = wound_nearest.representative_near(&wound_reference);
+        assert!(
+            (units::rad_to_deg(placed_wound.angles[5]) - 400.0).abs() < 1e-6,
+            "joint 6 is {} degrees after placement, not the 400 of the reference",
+            units::rad_to_deg(placed_wound.angles[5])
+        );
     }
 
     #[test]
@@ -343,6 +403,36 @@ mod tests {
                     "offset {offset_deg}, runtime {runtime_deg}"
                 );
             }
+        }
+
+        // The *placement* round trip is the one a joint that has wound a turn takes, and it
+        // is not `runtime_angle`'s: the solver's answer for the same configuration, a whole
+        // turn away, is placed beside the total the joint is holding
+        // (`representative_near`), and only then does the offset come back off — with no
+        // wrap, or the winding would be the whole turn `runtime_angle` folds away.
+        for (offset_deg, runtime_deg) in [
+            (0.0_f64, 400.0_f64),
+            (90.0, 400.0),
+            (-90.0, -400.0),
+            (137.5, 719.95),
+        ] {
+            // What the joint holds, and what the solver reports for the same place: the same
+            // total reduced into the single turn `atan2` reads it out of.
+            let held = total_angle(offset_deg, runtime_deg);
+            let solver = total_angle(offset_deg, runtime_deg % 360.0);
+            let placed = units::nearest_representative(solver, held);
+            let back = placed - units::deg_to_rad(offset_deg);
+            assert!(
+                units::wrap_angle(back - runtime_deg.to_radians()).abs() < 1e-12,
+                "offset {offset_deg}, runtime {runtime_deg}: placement gives {} degrees",
+                units::rad_to_deg(back)
+            );
+            assert!(
+                (placed - held).abs() < 1e-9,
+                "offset {offset_deg}, runtime {runtime_deg}: the placed total {} is not the \
+                 one the joint holds {held}",
+                placed
+            );
         }
     }
 }

@@ -2,6 +2,7 @@ module
 -- These are `public import`s because the declarations below are exported
 -- (`@[expose] public section`): everything their types and bodies mention has to
 -- be part of this module's public interface, or importers cannot use them.
+public import Mathlib.Algebra.Order.Round
 public import Mathlib.Analysis.Real.Sqrt
 public import Mathlib.Analysis.SpecialFunctions.Complex.Arg
 public import Mathlib.Analysis.SpecialFunctions.Trigonometric.Angle
@@ -49,6 +50,12 @@ implementation only avoids intermediate overflow.
 the solver returns joint angles normalised into `(-π, π]`, while every statement about it is
 modulo a full turn - an equality in `Real.Angle` - so the normalisation itself never has to
 appear in a proof. `wrap_coe_angle` is that observation.
+
+`nearestRepresentative` and `turnIndex` put the dropped winding back, which is what a joint
+jog needs: the angle a solver returns is defined modulo a full turn, the joint it is about to
+be sent to is not, and the difference between the two is a whole turn of motion. They are
+`crates/robot-kinematics`'s `units::nearest_representative` and `units::turn_index`, and
+`Solution::representative_near` lifts the first from one angle to a whole configuration.
 -/
 
 namespace RealAtan2
@@ -196,6 +203,185 @@ theorem cos_wrap (θ : ℝ) : Real.cos (wrap θ) = Real.cos θ := by
 /-- The sine half of `cos_wrap`. -/
 theorem sin_wrap (θ : ℝ) : Real.sin (wrap θ) = Real.sin θ := by
   rw [← Real.Angle.sin_coe (wrap θ), wrap_coe_angle θ, Real.Angle.sin_coe θ]
+
+/-! ## The nearest representative, and the turn index
+
+`wrap` is a *canonical* form: it throws away the winding an angle carries. That is the right
+thing for a solver result - defined modulo a full turn - and the wrong thing for the joint it
+is about to be sent to. `simulator.py`'s `_jog_joint` accumulates
+(`joint_angles[joint_index] += direction * step`), so a joint on the arm can sit several turns
+from zero, and handing it the canonical representative costs it every turn it has wound: a J6
+held at 400 degrees would spin the whole turn down to the solver's 40, which is a whole-turn
+joint motion manufactured out of a jog of a fraction of a turn.
+
+`nearestRepresentative` places the answer back beside the joint instead, moving it by at most
+a half turn, and `turnIndex` names the turns the placement carries - the winding `wrap`
+discarded. The two are `crates/robot-kinematics`'s `units::nearest_representative` and
+`units::turn_index`. What a Cartesian jog rests on is the pair `nearestRepresentative_sub_le`
+(among the representatives of a solved angle, the one placed is the one that moves the joint
+least) and `nearestRepresentative_coe_angle` (the placement cannot change the arm), with
+`turnIndex_spec` making the decomposition exact: an angle is so many whole turns plus its
+representative, and nothing is left over. -/
+
+/-- `wrap`'s image is exactly `(-π, π]`: `atan2_mem_Ioc` read through `wrap`'s definition, and
+the range every comparison below is made against. -/
+theorem wrap_mem_Ioc (θ : ℝ) : wrap θ ∈ Set.Ioc (-Real.pi) Real.pi := by
+  rw [wrap]
+  exact atan2_mem_Ioc _ _
+
+/-- Every angle is its own representative plus a whole number of turns. `wrap_coe_angle` says
+the two are the same `Real.Angle`; this is that fact over `ℝ`, where the difference of two
+reals with the same angle is an integer multiple of `2π` and nothing else. The integer it
+produces is what `turnIndex` names. -/
+theorem exists_eq_wrap_add_int_mul_two_pi (θ : ℝ) : ∃ k : ℤ, θ = wrap θ + k * (2 * Real.pi) := by
+  have h0 : ((θ - wrap θ : ℝ) : Real.Angle) = 0 := by
+    rw [Real.Angle.coe_sub, wrap_coe_angle θ, sub_self]
+  obtain ⟨k, hk⟩ := Real.Angle.coe_eq_zero_iff.mp h0
+  rw [zsmul_eq_mul] at hk
+  exact ⟨k, by rw [hk]; ring⟩
+
+/-- How many whole turns `θ` carries: `(θ - wrap θ) / (2π)` rounded to an integer. The Lean
+`units::turn_index` of `crates/robot-kinematics`.
+
+The quotient is an integer by construction - `exists_eq_wrap_add_int_mul_two_pi` - so the
+rounding step only ever sees an integer, and the tie rule, Rust's and this one's alike, is
+never reached. Reading the count off the difference from what `wrap` returned, rather than off
+`θ` alone, is what keeps the branch cut out of it: `θ ≡ π` is where a formula like
+`⌊(θ + π)/(2π)⌋` mis-assigns a turn, because the positive half turn is already inside `wrap`'s
+range `(-π, π]`, and subtracting the representative first resolves that boundary before the
+division.
+
+An index is a *representation*, not a constraint: nothing here limits how far a joint may
+wind, it only names where on its winding the joint is, and a joint past a full turn is exactly
+the case it exists for. -/
+def turnIndex (θ : ℝ) : ℤ := round ((θ - wrap θ) / (2 * Real.pi))
+
+/-- The decomposition `turnIndex` is named for: `θ` is that many whole turns past its own
+representative. The index is not a label attached to the angle but a count: the two terms on
+the left reconstitute `θ` exactly, over `ℝ` and with no tolerance, so the turns the rounding
+recovers are exactly the turns the decomposition needs. -/
+theorem turnIndex_spec (θ : ℝ) : (turnIndex θ : ℝ) * (2 * Real.pi) + wrap θ = θ := by
+  obtain ⟨k, hk⟩ := exists_eq_wrap_add_int_mul_two_pi θ
+  have hk' : (θ - wrap θ) / (2 * Real.pi) = (k : ℝ) := by
+    rw [show θ - wrap θ = (k : ℝ) * (2 * Real.pi) by linarith [hk]]
+    exact mul_div_cancel_right₀ _ (by positivity)
+  rw [turnIndex, hk', round_intCast]
+  simpa [add_comm] using hk.symm
+
+/-- `turnIndex_spec` read back the other way: what `wrap` discards is exactly that many whole
+turns, and the pair `(turnIndex θ, wrap θ)` is the whole-turns part and the residual of `θ`
+with nothing left over. -/
+theorem wrap_sub_turnIndex_mem (θ : ℝ) : wrap θ = θ - (turnIndex θ : ℝ) * (2 * Real.pi) := by
+  linarith [turnIndex_spec θ]
+
+/-- The representative of `a` nearest the reference `r`: `r + wrap (a - r)`, the
+`units::nearest_representative` of `crates/robot-kinematics`.
+
+`a` here is an angle a solver returned, so it is defined modulo a full turn; `r` is the joint
+it is about to be sent to, which is not. Handing the joint the canonical representative
+`wrap a` would move it by the whole winding it dropped; this places the answer where the joint
+already is, a half turn or less away. `nearestRepresentative_sub` reads the implied motion off
+the definition, `abs_nearestRepresentative_sub_le_pi` bounds it by the half turn,
+`nearestRepresentative_sub_le` says no other representative does better, and
+`nearestRepresentative_coe_angle` says the arm cannot tell which representative it was given.
+
+The Rust names the same function with the arguments the other way round
+(`nearest_representative (angle, reference)`), and `Solution::representative_near` applies it
+joint by joint across a whole configuration. -/
+def nearestRepresentative (r a : ℝ) : ℝ := r + wrap (a - r)
+
+/-- Choosing a representative does not change the arm: the placed angle is the same
+`Real.Angle` as the one it was placed from. A pose sees each joint angle only through its
+cosine and sine (`fk_congr` in `Kinematics.lean`), and the two angles differ by a whole number
+of turns, so the placement cannot change what the solver solved for - it decides where on the
+winding to carry out a pose, not which pose that is. -/
+theorem nearestRepresentative_coe_angle (r a : ℝ) :
+    (nearestRepresentative r a : Real.Angle) = (a : Real.Angle) := by
+  rw [nearestRepresentative, Real.Angle.coe_add, wrap_coe_angle (a - r), Real.Angle.coe_sub,
+    add_sub_cancel]
+
+/-- The motion a placement implies, which is the whole cost of choosing a representative:
+exactly the wrapped difference between the solved angle and the joint's own. It is what the
+placement is defined by, and what every bound below is a statement about. -/
+theorem nearestRepresentative_sub (r a : ℝ) : nearestRepresentative r a - r = wrap (a - r) := by
+  rw [nearestRepresentative]
+  ring
+
+/-- The placement never moves a joint further than a half turn: the motion is a `wrap`, so it
+lies in `(-π, π]` whatever the reference and whatever the joint's winding. This is the bound
+that makes a placement safe on a joint whose winding nobody tracked - no reference is far
+enough from an angle for the move to become a whole turn. -/
+theorem abs_nearestRepresentative_sub_le_pi (r a : ℝ) :
+    |nearestRepresentative r a - r| ≤ Real.pi := by
+  rw [nearestRepresentative_sub]
+  exact abs_le.mpr ⟨(wrap_mem_Ioc (a - r)).1.le, (wrap_mem_Ioc (a - r)).2⟩
+
+/-- Among the whole-turn translates of a real, the one in `(-π, π]` is the one of least
+absolute value. Every translate differs from it by a whole number `n` of turns, and the bounds
+of the range do the rest: a turn in either direction already reaches `π` in magnitude or past
+it, and each further turn only adds. This is why `wrap` is the right reduction to measure
+distances against a reference with, and it is what `nearestRepresentative_sub_le` runs on. -/
+theorem abs_le_abs_add_int_mul_two_pi {w : ℝ} (hw : w ∈ Set.Ioc (-Real.pi) Real.pi) (n : ℤ) :
+    |w| ≤ |w + n * (2 * Real.pi)| := by
+  rcases lt_trichotomy n 0 with hn | hn | hn
+  · -- A whole turn or more backwards: `w + n·2π` is past the negative half turn, so its
+    -- distance from `0` is `-(w + n·2π)`, and `w ≤ π` together with `n·2π ≤ -2π` puts both
+    -- `w` and `-w` below that.
+    have hn1 : (n : ℝ) ≤ -1 := by
+      exact_mod_cast (show n ≤ -1 by omega)
+    have hc : (n : ℝ) * (2 * Real.pi) ≤ -2 * Real.pi := by
+      calc (n : ℝ) * (2 * Real.pi) ≤ (-1 : ℝ) * (2 * Real.pi) :=
+            mul_le_mul_of_nonneg_right hn1 (by linarith [Real.pi_pos])
+        _ = -2 * Real.pi := by ring
+    have hneg : w + (n : ℝ) * (2 * Real.pi) < 0 := by linarith [hw.2, hc, Real.pi_pos]
+    rw [abs_of_neg hneg]
+    exact abs_le.mpr ⟨by linarith [hc, Real.pi_pos], by linarith [hw.2, hc, Real.pi_pos]⟩
+  · -- No turn at all: the two sides are the same number.
+    subst hn
+    simp
+  · -- A whole turn or more forwards, the mirror of the first case: `w + n·2π` is past the
+    -- positive half turn, and `w > -π` together with `n·2π ≥ 2π` puts both `w` and `-w` below
+    -- it.
+    have hn1 : (1 : ℝ) ≤ (n : ℝ) := by
+      exact_mod_cast (show (1 : ℤ) ≤ n by omega)
+    have hc : 2 * Real.pi ≤ (n : ℝ) * (2 * Real.pi) := by
+      calc 2 * Real.pi = (1 : ℝ) * (2 * Real.pi) := by ring
+        _ ≤ (n : ℝ) * (2 * Real.pi) :=
+            mul_le_mul_of_nonneg_right hn1 (by linarith [Real.pi_pos])
+    have hpos : 0 < w + (n : ℝ) * (2 * Real.pi) := by linarith [hw.1, hc, Real.pi_pos]
+    rw [abs_of_pos hpos]
+    exact abs_le.mpr ⟨by linarith [hw.1, hc, Real.pi_pos], by linarith [hc, Real.pi_pos]⟩
+
+/-- `wrap` is the representative of `θ` nearest the origin, in the form a caller can use:
+`wrap θ` is at least as close to `0` as `θ` shifted by any whole number of turns. The shift is
+`exists_eq_wrap_add_int_mul_two_pi`'s, after which `θ` has dropped out of the comparison and
+what is left is `abs_le_abs_add_int_mul_two_pi`'s statement about `wrap`'s own range. -/
+theorem abs_wrap_le_abs_add_int_mul_two_pi (θ : ℝ) (k : ℤ) :
+    |wrap θ| ≤ |θ + k * (2 * Real.pi)| := by
+  obtain ⟨m, hm⟩ := exists_eq_wrap_add_int_mul_two_pi θ
+  have h : θ + (k : ℝ) * (2 * Real.pi) = wrap θ + ((m + k : ℤ) : ℝ) * (2 * Real.pi) := by
+    conv_lhs => rw [hm]
+    push_cast
+    ring
+  rw [h]
+  exact abs_le_abs_add_int_mul_two_pi (wrap_mem_Ioc θ) (m + k)
+
+/-- **Among the representatives of a solved angle, the one placed is the one that moves the
+joint least.** The right-hand side is the distance from the joint's own angle `r` to the `k`-th
+representative `a + k·2π` of the solved angle, so the statement is the placement's defining
+property, and it holds for every integer `k` at once: the nearest representative is canonical,
+not one convention among several that happen to agree on the common cases.
+
+Over `ℝ` the comparison is exact and needs no tolerance. Both sides are `wrap`'s to decide:
+the left is `|wrap (a - r)|` by `nearestRepresentative_sub`, and the right is
+`|(a - r) + k·2π|`, which is `abs_wrap_le_abs_add_int_mul_two_pi` with `θ = a - r` - so the
+whole turn `k` is spent before the comparison starts, and what is left is a statement about
+one number's distance from zero against its own whole-turn translates. -/
+theorem nearestRepresentative_sub_le (r a : ℝ) (k : ℤ) :
+    |nearestRepresentative r a - r| ≤ |a + k * (2 * Real.pi) - r| := by
+  rw [nearestRepresentative_sub,
+    show a + (k : ℝ) * (2 * Real.pi) - r = (a - r) + (k : ℝ) * (2 * Real.pi) by ring]
+  exact abs_wrap_le_abs_add_int_mul_two_pi (a - r) k
 
 /-! ## Reflection: the second-order interaction of `atan2` with negation -/
 
