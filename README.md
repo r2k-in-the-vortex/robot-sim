@@ -21,12 +21,11 @@ solved with a closed-form inverse kinematics derived for this arm's structure.
 The mathematics behind it is written out in [`mathematics.md`](docs/mathematics.md) and
 proved in Lean under [`lean/`](lean) — see [Mathematics](#mathematics) below.
 
-There are two implementations. The **Rust** one under [`crates/`](crates) is the
-one being developed: it has a GPU renderer, a kinematics core built for a real-time
-control loop, and a force/torque sensor model that the Python never had. The
-**Python** one (`simulator.py`, `kinematics.py`) is the original, kept as a
-reference and as a frozen regression oracle — its behaviour is the contract the Rust
-matches, and it still passes its own suite unchanged.
+The application is the **Rust** one under [`crates/`](crates): it has a GPU renderer,
+a kinematics core built for a real-time control loop, and a force/torque sensor model.
+The original Python Tkinter viewport has been retired; `kinematics.py` remains as the
+closed-form oracle the Rust compatibility layer is tested against, together with the
+Python suites that check it.
 
 ![main window](docs/main_window_image.png)
 
@@ -36,15 +35,6 @@ matches, and it still passes its own suite unchanged.
 
 ```powershell
 cargo run -p robot-app --release
-```
-
-### Python
-
-Install the Python dependencies and launch the viewport:
-
-```powershell
-python -m pip install -r requirements.txt
-python simulator.py
 ```
 
 ## Using the simulator
@@ -156,8 +146,7 @@ The derivation is in the *Inverse kinematics* section of
 | `crates/robot-golden` | Exact rational arithmetic and the Lean numeral format, for tests |
 | `xtask` | `cargo xtask gen-golden` / `check-golden` |
 | `docs/` | Derivations, verification boundaries, the Lean↔Rust map, and the Rust transition record |
-| `simulator.py` | The original Tkinter application, kept as a reference |
-| `kinematics.py` | The original DH transforms and closed-form inverse kinematics |
+| `kinematics.py` | The original DH transforms and closed-form inverse kinematics, kept as the oracle for the Rust compatibility tests |
 | `lean/` | Lean formalisation and proofs of the same mathematics |
 | `robot_parameters.json` | Default DH and mesh configuration |
 | `mesh/` | Example STL meshes to load into the view |
@@ -217,10 +206,11 @@ does not depend on which frame it is evaluated in (`inertialWrench_transport`,
 
 ## Tests
 
-Much of `test_kinematics.py` drives real Tk widgets, so those tests skip
-themselves when there is no display. `test_force_torque.py` re-derives every
-number in `test_data/force_torque_frames.json` (schema 3, including the
-`dynamics_cases` section) from the case inputs in exact rational arithmetic.
+`test_kinematics.py` checks the Python closed-form solver that
+`crates/robot-kinematics/tests/python_compat.rs` runs as its differential oracle.
+`test_force_torque.py` re-derives every number in
+`test_data/force_torque_frames.json` (schema 3, including the `dynamics_cases`
+section) from the case inputs in exact rational arithmetic.
 
 The Rust suites go further, because they can: the forward chain, the wrench
 algebra and the dynamics are polynomials in their inputs, so they evaluate exactly
@@ -243,10 +233,10 @@ cargo xtask check-golden        # regenerate and fail if the committed data has 
 `check-golden` takes minutes rather than seconds: the Lean generators re-derive
 each case by evaluation before writing anything, and that check sweep dominates.
 
-CI runs three independent jobs: the Python suite under `xvfb-run`, the Rust
-workspace, and `lake build` over the Lean libraries in `defaultTargets`. The Lean
-job also regenerates the ground truth and fails if it differs from what is
-committed — the Rust and Python suites both read the committed files and never
+CI runs three independent jobs: the Python suite, the Rust workspace, and
+`lake build` over the Lean libraries in `defaultTargets`. The Lean job also
+regenerates the ground truth and fails if it differs from what is committed —
+the Rust suites and `test_force_torque.py` both read the committed files and never
 regenerate them, so without that step the data could drift from the Lean that
 produced it while every suite kept passing on stale numbers.
 
@@ -264,25 +254,28 @@ the items it builds are held to the same read-only properties:
 node --test ".vscode/extensions/robot-arm-validations/test/*.test.js"
 ```
 
-## Where the Rust deliberately differs from the Python
+## Where the Rust deliberately differs from the retired Python app
 
-Four changes are intentional rather than oversights, and all are visible.
+The Python Tkinter viewport (`simulator.py`) has been removed. The record of the port,
+including the line references these notes were written against, is in
+[`docs/rust_transition_remarks.md`](docs/rust_transition_remarks.md). Four changes are
+intentional rather than oversights, and all are visible.
 
-**Mesh scale.** `simulator.py` applies no scale factor to the STL meshes at all,
+**Mesh scale.** The Python app applied no scale factor to the STL meshes at all,
 so the meshes and the DH table never actually lined up: the shipped meshes are in
 millimetres and span hundreds, while the DH dimensions are tens. The Rust applies a
 factor of `0.1`, which is what makes a loaded mesh sit on the arm. The shipped
-`robot_parameters.json` has every mesh path empty, so nothing loads at startup in
-either implementation until a mesh is chosen.
+`robot_parameters.json` has every mesh path empty, so nothing loads at startup
+until a mesh is chosen.
 
-**Gizmo checkboxes.** In `simulator.py` the labels and the things they toggle are
+**Gizmo checkboxes.** In the Python app the labels and the things they toggle are
 off by one: the checkbox labelled *J1* toggles the **base** gizmo, *J2* toggles J1,
 and so on to *Tool/Flange*, which toggles J6. The render side is right and the
 labels are wrong. The Rust labels them to match what they toggle.
 
-**Save and Load ask for a file.** `simulator.py` has no chooser for either: both
-read and write `Path(__file__).with_name("robot_parameters.json")`, the file beside
-the script, and report through a message box. A compiled binary has no script
+**Save and Load ask for a file.** The Python app had no chooser for either: it read
+and wrote `Path(__file__).with_name("robot_parameters.json")`, the file beside the
+script, and reported through a message box. A compiled binary has no script
 directory to anchor that to, so the Rust starts at the same name — beside the
 executable, then in the working directory, then beside the executable — and opens
 whatever the user picks. `crates/robot-app/build.rs` stages the shipped file there
@@ -296,15 +289,14 @@ while the Rust writes `json.dumps(data, indent=2) + "\n"` as-is. Both read eithe
 form back.
 
 **A pose jog keeps a wound joint's winding.** A solved angle is defined modulo a
-full turn, and the Python materialises that on the way back to the UI:
-`kinematics.py` wraps every angle its solver returns (`_wrap_angle(total -
-joint.theta)`, `:562`), and `_pose_jog` stores them as they come
-(`simulator.py:392-396`, through `_apply_joint_solution`'s `math.degrees`,
-`:343-353`). A joint on the arm carries no such equivalence: a joint jog
-accumulates (`joint_angles[joint_index] += direction * step`, `:335`) and J6 can
-sit at 400°, so the solver's 40° is that same joint a whole turn away — a
-Cartesian jog from it stores 40°, spinning the arm a full turn on a one-unit
-move. The Rust keeps the reference's selection of the candidate, because a
+full turn, and `kinematics.py` materialises that on the way back to a caller:
+it wraps every angle its solver returns (`_wrap_angle(total - joint.theta)`,
+`:562`), and the Python app stored the result as it came, through
+`_apply_joint_solution`'s `math.degrees`. A joint on the arm carries no such
+equivalence: a joint jog accumulates, and J6 can sit at 400°, so the solver's
+40° is that same joint a whole turn away — a Cartesian jog from it stores 40°,
+spinning the arm a full turn on a one-unit move. The Rust keeps the reference's
+selection of the candidate, because a
 candidate a whole turn away really is the configuration the arm is holding,
 and places the chosen one at the representatives nearest the angles the arm
 holds (`robot_kinematics::units::nearest_representative`). The implied motion

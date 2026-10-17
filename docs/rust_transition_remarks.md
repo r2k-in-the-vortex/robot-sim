@@ -45,8 +45,12 @@ Seven crates, ~18,900 lines, plus 1,625 lines of new Lean.
 | `xtask` | `cargo xtask gen-golden` / `check-golden` |
 | — | `lean/KinematicsTestData.lean`, `lean/BranchDecisionQ.lean`: two new generators |
 
-The Python is **unchanged and still passing**. It is the reference for behaviour and a
-frozen regression oracle, not a thing being deleted.
+The Python application (`simulator.py`) has since been retired, superseded by
+`robot-app`. `kinematics.py` and the Python suites remain: `python_compat.rs` runs
+`kinematics.py` as the differential oracle for the compatibility solver, and
+`test_force_torque.py` checks the Lean-generated ground truth. References to
+`simulator.py` throughout the tree name the file as it stood before removal; the file
+itself remains in git history.
 
 ## Architecture decisions worth knowing
 
@@ -191,7 +195,7 @@ Everything below was re-run after the last edit, with the agents stopped.
 | Gate | Result |
 | --- | --- |
 | `cargo test --workspace` | 318 passed, 0 failed |
-| Python suite | 46 passed, unchanged |
+| Python suite | 46 passed, unchanged (before the app's removal; its UI tests are gone) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | `cargo fmt --all --check` | clean |
 | `cd lean && lake build` | Build completed successfully (2250 jobs) |
@@ -303,10 +307,9 @@ and scissors the egui pass to it. And `ATTRIBUTE_COLOR` is used verbatim as line
    `robot_parameters.json` carries no masses or inertias. Anything in that direction is new
    mathematics with no specification behind it, and should be its own decision.
 
-6. **The README's UI prose still describes the Python.** The four visible differences are
+6. **The README's UI prose was inherited from the Python.** The four visible differences are
    documented in a section of their own, and the Jogging and Copy XYZ paragraphs now name the
-   Rust's winding annotation as well; the rest is inherited and is accurate for the Python. It
-   would be better rewritten against the Rust once someone has driven the interface by hand —
+   Rust's winding annotation as well; the rest was never re-driven against the Rust by hand —
    the agent that built it could not exercise dialogs or the clipboard headlessly, so those
    two are the parts with the least evidence behind them. The winding annotation has since
    been driven by hand — J6 jogged to 400°, a one-unit X jog, the front readout and the

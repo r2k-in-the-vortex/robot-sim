@@ -1,8 +1,8 @@
 # CI: the Python suite, the Lean proof build, and the Rust workspace.
 #
 # The three jobs are independent -- none needs another's toolchain -- with one exception
-# noted below. The Python tests read the committed ``test_data``; the Rust tests do too.
-# Only the Lean job regenerates it, because Lean is what produces it.
+# noted below. The Python force/torque tests read the committed ``test_data``; the Rust
+# tests do too. Only the Lean job regenerates it, because Lean is what produces it.
 
 name: CI
 
@@ -30,20 +30,15 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
 
       # The suite is unittest-based, so it needs no runner beyond the standard
       # library: ``discover`` picks up ``test_kinematics.py`` and
-      # ``test_force_torque.py``.
-      #
-      # Much of ``test_kinematics.py`` drives real Tk widgets, and those tests skip
-      # themselves when there is no display -- Xvfb, which the runner image ships,
-      # keeps them running for real instead of quietly dropping out of the run.
+      # ``test_force_torque.py``. Neither needs a display or a third-party
+      # package: ``test_kinematics.py`` checks the Python solver the Rust
+      # differential runs, and ``test_force_torque.py`` checks the committed
+      # ground truth.
       - name: Run tests
-        run: xvfb-run -a python -m unittest discover -v -p "test_*.py"
+        run: python -m unittest discover -v -p "test_*.py"
 
   rust-tests:
     name: Rust tests
