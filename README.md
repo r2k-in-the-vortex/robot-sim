@@ -1,3 +1,15 @@
+# Preface
+
+AI coding challange is in verification and correctness.
+The entire point is to spend less human time, but still come out with functional program. 
+The approach used here is to rely on Lean specification to ensure the underlying math of robot motion is correct.
+The Lean code itself is also AI coded, but it's proved correct mathematics. 
+Trying this was the primary motiovation of the project.
+
+The final consideration is cost.
+This project here at current state has spent $10.24USD of Deepseek tokens, very economical in my estimate.
+It doesn't have to be a frontier model when validations and testing are good enough to guide a cheaper model.
+
 # Six-axis robot arm simulator
 
 A desktop application that simulates a 6-axis articulated robot arm. It draws the
