@@ -27,7 +27,7 @@ The original Python Tkinter viewport has been retired; `kinematics.py` remains a
 closed-form oracle the Rust compatibility layer is tested against, together with the
 Python suites that check it.
 
-![main window](docs/main_window_image.png)
+https://github.com/user-attachments/assets/c1ebbbeb-0dfd-47ea-b1d1-f8ae6af8d5c2
 
 ## Run
 
@@ -122,6 +122,27 @@ in the clipboard text; a joint inside ±360° reads exactly as it does in the
 Python. A pose jog keeps that winding: the solved configuration is placed
 beside the angles the arm is holding, so a jog from a wound joint implies at
 most a half turn of motion rather than a whole turn back to its wrapped angle.
+
+### Jog modes
+
+The **Step** / **Continuous** radio pair above the button groups selects how the
+jog buttons behave. **Step** is the behavior described above, and the default:
+one click is one step.
+
+**Continuous** turns every jog button — base frame, tool frame, and the six
+joint ± buttons — into a hold, and the step boxes become rates: one second of
+holding is one step, so a 2.5 s hold moves 2.5 steps. The target is measured
+from the pose the arm held when the press started rather than accumulated frame
+by frame, so a dropped or late frame cannot bend the path, and the release
+timestamp decides exactly where the arm is left. The 3D view follows while the
+button is down and the status line counts the move up as it goes.
+
+A hold ends when the button is released or when the window loses focus, and it
+does not outlive the 3D View tab. A hold that walks past the workspace stops at
+the last pose the solver could answer for, says so in the status line, and
+stays live until released. A DH field edited mid-hold steers the next jog, not
+the one in flight. `simulator.py` has no hold mode; this one is the Rust port's
+addition.
 
 ## Inverse kinematics
 
