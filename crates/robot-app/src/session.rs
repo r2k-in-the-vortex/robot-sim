@@ -219,7 +219,9 @@ struct JogHold {
     rate: f64,
     /// The timestamp of the press, in the same seconds as every later `now`.
     start_time: f64,
-    /// The arm's angles at the press, which every frame's target is measured from.
+    /// The arm's angles at the press, which every frame's *target pose* is measured from.
+    /// The branch that reaches it is chosen against the angles the arm holds now, so a
+    /// wind-up built frame by frame survives for as long as the hold does.
     start_angles: [f64; JOINT_COUNT],
     /// The DH table as it stood at the press. A sustained jog is one operation, so an edit
     /// mid-hold steers the next jog rather than the one in flight — the same rule that makes
@@ -500,7 +502,9 @@ impl Session {
     /// `amount` is signed and in the units of the target's step field: a length for the
     /// translations, degrees for the rotations and the joint moves. `start_angles` is the
     /// configuration the amount is measured from — the angles the arm holds, for a click; the
-    /// angles it held at the press, for a hold.
+    /// angles it held at the press, for a hold. It is the target's starting point only: a
+    /// pose jog chooses its branch, and places its answer, beside the angles the arm holds
+    /// now ([`Self::jog_pose_to`]), which for a hold are the previous frame's.
     ///
     /// The two arms are deliberately different shapes. A pose jog needs the geometry and the
     /// solver; a joint jog is `_jog_joint` (`simulator.py:327-341`) and touches neither, so a
@@ -527,9 +531,13 @@ impl Session {
                 // the angles the arm holds now. That is what makes a hold absolute — each
                 // frame asks for the press's pose plus the whole elapsed time, not the last
                 // frame's pose plus a delta, so frame jitter cannot bend the path.
+                //
+                // The *branch* is another matter and is chosen against the angles the arm
+                // holds now, by `jog_pose_to`: see the note there on why a hold must follow
+                // its own previous frames the way a click follows the previous click.
                 let start_pose = fk(&geometry, &parameters.total_angles_rad(start_angles));
                 let requested = pose.offset(&start_pose, amount);
-                self.jog_pose_to(parameters, &requested, start_angles, document, angles)
+                self.jog_pose_to(parameters, &requested, document, angles)
             }
         }
     }
@@ -544,7 +552,6 @@ impl Session {
         &mut self,
         parameters: &DHParameters,
         requested: &Pose<f64>,
-        start_angles: &[f64; JOINT_COUNT],
         document: &mut Document,
         angles: &mut [f64; JOINT_COUNT],
     ) -> Result<(), String> {
@@ -563,11 +570,16 @@ impl Session {
         // Using the totals keeps the reference's own `total_angles_rad` as the single
         // place the offset is applied.
         //
-        // The reference's "current" is the arm's stored angles; here it is `start_angles`,
-        // which is the same thing for a click and the press-time configuration for a hold —
-        // so a held jog keeps the branch it set out on for as long as it lasts.
+        // "Current" is the arm's stored angles, for a hold as much as for a click: each
+        // frame selects against what the previous frame left behind. Selecting against the
+        // press-time angles instead would make a hold skip the intermediate branches a
+        // sequence of clicks walks through — at the shipped arm's J5 = 45° pose, a held base
+        // Rz+ jog would never wind J6 past a full turn the way the same jog in step mode
+        // does, so the two modes would disagree about the joint's index. Measuring the
+        // *target* from the press still keeps the path absolute; only the choice of branch
+        // follows the arm.
         let reference = robot_kinematics::Solution {
-            angles: parameters.total_angles_rad(start_angles),
+            angles: parameters.total_angles_rad(angles),
             shoulder: 1,
             elbow: 1,
         };
@@ -604,8 +616,12 @@ impl Session {
     ///
     /// `now` is the frame's timestamp in seconds, read from the same clock every frame. The
     /// first call for a press freezes the step field, the DH table and the arm's angles, and
-    /// every later frame measures from those, so nothing accumulates and a dropped, late or
+    /// every later frame measures the *target pose* from those, so a dropped, late or
     /// reordered frame changes nothing about where the arm belongs — only when it is drawn.
+    /// The branch that reaches the target is chosen against the angles the arm holds now
+    /// ([`Session::jog_pose_to`]): a hold follows its own frames the way successive clicks
+    /// follow each other, so it winds a joint past a full turn exactly as they do instead of
+    /// skipping the intermediate branches in one absolute placement.
     ///
     /// A press the fields refuse starts nothing and says why in the status line, exactly as a
     /// click would. The button is still down, so the next frame asks again and gets the same
@@ -2120,9 +2136,11 @@ mod tests {
 
     #[test]
     fn every_frame_of_a_hold_asks_for_the_pose_one_late_frame_would() {
-        // The amount is measured from the press, never from the previous frame, so the frames
-        // a hold is drawn at cannot bend the path: an irregular sequence has to land exactly
-        // where a single drive at the same instant does.
+        // The target pose is measured from the press, never from the previous frame, so the
+        // frames a hold is drawn at cannot bend where the arm belongs: an irregular sequence
+        // has to land exactly where a single drive at the same instant does. Branch selection
+        // follows the arm from frame to frame; here every frame stays on the branch the whole
+        // one-step move ends on, so even that agrees bit for bit.
         let (mut irregular, mut document_a, mut angles_a) = session();
         irregular.begin_jog(base(Axis::Y), 1, 0.0, &angles_a);
         for now in [0.1, 0.13, 0.6, 1.0] {
@@ -2350,6 +2368,91 @@ mod tests {
         assert_eq!(
             session.joint_angles[0], "0",
             "the fields were not rewritten"
+        );
+    }
+
+    /// A held jog has to pass through the same branches a sequence of clicks does, so it
+    /// winds the joints the same way. This is the issue's own pose — J5 = 45°, everything
+    /// else zero — where 400 one-degree base Rz+ clicks leave J6 more than a whole turn
+    /// backwards, the winding the readout annotates as `idx -1`. Measuring every frame's
+    /// branch from the press-time angles instead places each frame's answer beside the
+    /// J6 = 0 the hold started from, so the hold lands inside a single turn and the index
+    /// never appears — the bug this test exists for. (The jog goes past a full turn because
+    /// the annotation gate is the magnitude: exactly 360 is a rounding either side of the
+    /// boundary.)
+    ///
+    /// The hold is driven at 10 frames a second, a tenth of the rate field's one-step-per-
+    /// second, and the comparison is against clicks of the same total. The two paths need
+    /// not agree to the last bit — a frame's target is measured from the press and a
+    /// click's from the previous click — so the assertion is the winding and the joint
+    /// angles at solver tolerance, not `==`.
+    #[test]
+    fn a_held_jog_winds_the_joints_the_way_the_equivalent_clicks_do() {
+        const START: [f64; JOINT_COUNT] = [0.0, 0.0, 0.0, 0.0, 45.0, 0.0];
+
+        let (mut clicked, mut document_a, _) = session();
+        clicked.rotation_step = String::from("1");
+        let mut angles_a = START;
+        clicked.sync_joint_angles(&angles_a);
+        for _ in 0..400 {
+            clicked.jog(rotate_base(Axis::Z), 1, &mut document_a, &mut angles_a);
+        }
+
+        let (mut held, mut document_b, _) = session();
+        held.rotation_step = String::from("1");
+        let mut angles_b = START;
+        held.sync_joint_angles(&angles_b);
+        held.begin_jog(rotate_base(Axis::Z), 1, 0.0, &angles_b);
+        for frame in 1..=4000 {
+            held.drive_jog(f64::from(frame) / 10.0, &mut document_b, &mut angles_b);
+        }
+
+        // J6 is the joint the issue names: more than one whole turn backwards, annotated
+        // as `idx -1`, in both modes. The residual is whatever the path leaves beside the
+        // turn, so the assertions are the turn count and the annotation, not the residual.
+        let clicked_turns = wound_turns(angles_a[5]).expect("a wound joint is annotated");
+        let held_turns = wound_turns(angles_b[5]).expect("a wound joint is annotated");
+        assert_eq!(
+            clicked_turns.0, -1,
+            "the clicks left J6 at {} degrees",
+            angles_a[5]
+        );
+        assert!(
+            angles_a[5] < -360.0,
+            "the clicks left J6 at {}, inside a single turn",
+            angles_a[5]
+        );
+        assert_eq!(
+            held_turns.0, clicked_turns.0,
+            "the hold left J6 at {} degrees; the clicks left it at {}",
+            angles_b[5], angles_a[5]
+        );
+        assert!(
+            front_readout(angles_b[5]).ends_with("idx -1"),
+            "the hold's readout is {:?}, without the index the clicks earned",
+            front_readout(angles_b[5])
+        );
+
+        // And the two modes agree on the whole configuration, not just the annotated
+        // joint: same branch, same winding, same place on it.
+        for joint in 0..JOINT_COUNT {
+            assert!(
+                (angles_b[joint] - angles_a[joint]).abs() < 1e-6,
+                "J{} is {} after the hold and {} after the clicks",
+                joint + 1,
+                angles_b[joint],
+                angles_a[joint]
+            );
+        }
+
+        // Both end at the same pose — the press pose turned 400 degrees — which is what
+        // makes the winding a choice of index rather than a different arm.
+        let clicked_pose = tool_pose_of(&document_a, &angles_a);
+        let held_pose = tool_pose_of(&document_b, &angles_b);
+        assert!(
+            held_pose.p.distance(clicked_pose.p) < 1e-9
+                && held_pose.r.frobenius_distance(clicked_pose.r) < 1e-9,
+            "the two modes did not end at the same pose"
         );
     }
 
