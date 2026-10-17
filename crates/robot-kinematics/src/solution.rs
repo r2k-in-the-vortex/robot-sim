@@ -73,6 +73,36 @@ impl<S: Scalar> Solution<S> {
         }
         total
     }
+
+    /// The same configuration with each angle placed at the representative nearest the
+    /// corresponding angle of `reference` ([`crate::units::nearest_representative`]), so that
+    /// moving to it keeps each joint's own winding.
+    ///
+    /// This is the other half of the branch-continuity pair. [`Self::wrapped_distance_sq`]
+    /// *selects* — and it is right to count a whole turn as zero there, because a candidate is
+    /// defined modulo a full turn and the two angles a turn apart are the same candidate. This
+    /// *places* the one that was selected, and it is right to count the turn here, because the
+    /// joint on the arm is not modulo anything: a joint jog accumulates
+    /// (`_jog_joint`'s `joint_angles[joint_index] += direction * step`, `simulator.py:335`), so
+    /// a solver answer of 40 degrees sent to a joint held at 400 degrees would undo a whole
+    /// turn the arm has already wound. The reference does exactly that: it picks the nearest
+    /// candidate and then stores the solver's angles as they came (`:392-396` via
+    /// `_apply_joint_solution`'s `math.degrees`, `:343-353`), which is the turn this keeps.
+    ///
+    /// The angles are placed, not `reference`'s: the result is this candidate, wherever along
+    /// its winding the arm happens to be. `shoulder` and `elbow` are copied from `self`
+    /// unchanged — they record how this candidate was built, and placing it moves it without
+    /// changing which of the solver's branches it is. `RealAtan2.nearestRepresentative` is the
+    /// per-angle Lean statement this lifts to a configuration.
+    pub fn representative_near(&self, reference: &Self) -> Self {
+        Self {
+            angles: core::array::from_fn(|joint| {
+                crate::units::nearest_representative(self.angles[joint], reference.angles[joint])
+            }),
+            shoulder: self.shoulder,
+            elbow: self.elbow,
+        }
+    }
 }
 
 /// A fixed-capacity list of candidates, sized by [`MAX_SOLUTIONS`].
@@ -220,5 +250,100 @@ mod tests {
         let reference = solution(1.1);
         let nearest = set.nearest_to(&reference).expect("non-empty");
         assert_eq!(nearest.angles[0], 1.0);
+    }
+
+    /// Every angle is placed and only the angles move: the branch labels are a property of how
+    /// the candidate was built, not of where along its winding it is standing, and a pose jog
+    /// stores the placed configuration with the same labels it chose.
+    #[test]
+    fn representative_places_all_six_angles_and_keeps_the_labels() {
+        let chosen = Solution {
+            angles: [0.4, -1.2, 2.0, 0.35, -2.9, 0.6981317007977318],
+            shoulder: -1,
+            elbow: -1,
+        };
+        // A reference wound a whole turn or two past the candidate on several joints, and
+        // standing still on the others, so that both no-ops and placements are exercised.
+        let reference = Solution {
+            angles: [
+                0.4 + 2.0 * core::f64::consts::PI,
+                -1.2,
+                2.0 - 4.0 * core::f64::consts::PI,
+                0.35 + 2.0 * core::f64::consts::PI,
+                -2.9 - 2.0 * core::f64::consts::PI,
+                0.6981317007977318 + 2.0 * core::f64::consts::PI,
+            ],
+            shoulder: 1,
+            elbow: 1,
+        };
+        let placed = chosen.representative_near(&reference);
+        assert_eq!(
+            placed.shoulder, -1,
+            "the placed configuration lost its shoulder label"
+        );
+        assert_eq!(
+            placed.elbow, -1,
+            "the placed configuration lost its elbow label"
+        );
+        for joint in 0..6 {
+            let want =
+                crate::units::nearest_representative(chosen.angles[joint], reference.angles[joint]);
+            assert_eq!(
+                placed.angles[joint], want,
+                "joint {joint} is {} after placement, want {want}",
+                placed.angles[joint]
+            );
+        }
+        assert_eq!(
+            placed.angles[0], reference.angles[0],
+            "a joint held a whole turn past the candidate must keep that turn"
+        );
+        assert_eq!(
+            placed.angles[1], chosen.angles[1],
+            "a joint already at the candidate's angle must not move"
+        );
+    }
+
+    /// The two operations as the pose jog uses them, on the issue's own case: `nearest_to`
+    /// picks the candidate — the solver's 40 degree J6 beats a rival at -140 degrees because
+    /// the wrapped metric sees the reference's 400 degrees as no distance away from it at all,
+    /// a whole turn of winding the numbers do not show — and `representative_near` then puts
+    /// the chosen angles back where the arm is holding them. Without the second step the jog
+    /// moves a joint a whole turn; without the first, it moves to the wrong branch.
+    #[test]
+    fn selection_then_placement_keeps_a_wound_joint_where_it_is() {
+        let wound = core::f64::consts::PI * 2.0 + 0.6981317007977318;
+        let reference = Solution {
+            angles: [wound; 6],
+            shoulder: 1,
+            elbow: 1,
+        };
+        let mut set = SolutionSet::new();
+        set.push(Solution {
+            angles: [0.6981317007977318; 6],
+            shoulder: -1,
+            elbow: -1,
+        });
+        set.push(Solution {
+            angles: [-2.443460952792061; 6],
+            shoulder: 1,
+            elbow: 1,
+        });
+
+        let chosen = set.nearest_to(&reference).expect("the set is not empty");
+        assert_eq!(
+            chosen.angles[0], 0.6981317007977318,
+            "the wrapped metric must select the 40 degree candidate over the -140 degree one"
+        );
+        let placed = chosen.representative_near(&reference);
+        for joint in 0..6 {
+            assert!(
+                (placed.angles[joint] - wound).abs() < 1e-12,
+                "joint {joint} lands at {} instead of the wound reference {wound}",
+                placed.angles[joint]
+            );
+        }
+        assert_eq!(placed.shoulder, -1, "the labels travel with the candidate");
+        assert_eq!(placed.elbow, -1, "the labels travel with the candidate");
     }
 }

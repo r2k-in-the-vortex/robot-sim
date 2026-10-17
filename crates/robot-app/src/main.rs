@@ -75,10 +75,16 @@ const PIXELS_PER_WHEEL_LINE: f64 = 50.0;
 /// the pose the reference opens in. Writing the resource is what drives the arm;
 /// [`scene::sync_joints`] reads it every frame.
 ///
-/// The runtime angles are held at **full precision**; the DH page's angle fields only ever
-/// render them at display precision, and [`session::Session::read_joint_angles`] decides
-/// whether a field still means the stored angle or a typed-in one. Saving never writes them:
-/// see [`session::Session::save_json`].
+/// The angles are **continuous**, not folded into a single turn. A joint jog accumulates
+/// (`joint_angles[joint_index] += direction * step`, `simulator.py:335`) and the joint keeps
+/// what it wound, so J6 can sit at 400°: that really is a whole turn further round than 40°,
+/// a Cartesian jog from there moves it a little instead of spinning it back, and the turn
+/// count is what the UI annotates beside the angle ([`session::wound_turns`]).
+///
+/// The angles are held at **full precision**; the DH page's angle fields only ever render
+/// them at display precision, and [`session::Session::read_joint_angles`] decides whether a
+/// field still means the stored angle or a typed-in one. Saving never writes them: see
+/// [`session::Session::save_json`].
 #[derive(Resource)]
 pub struct RobotState {
     pub document: Document,
