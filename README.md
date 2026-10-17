@@ -16,7 +16,7 @@ control loop, and a force/torque sensor model that the Python never had. The
 reference and as a frozen regression oracle — its behaviour is the contract the Rust
 matches, and it still passes its own suite unchanged.
 
-<video controls src="docs/Screen Recording 2026-10-16 195334.mp4" title="Title"></video>
+https://github.com/user-attachments/assets/c1ebbbeb-0dfd-47ea-b1d1-f8ae6af8d5c2
 
 ## Run
 
