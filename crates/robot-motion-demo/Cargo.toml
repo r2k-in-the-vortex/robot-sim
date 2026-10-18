@@ -1,0 +1,23 @@
+[package]
+name = "robot-motion-demo"
+description = "Interactive 1-DOF motion-planner demo: limits and boundary states in, planned q/v/a/j graphs out"
+version.workspace = true
+edition.workspace = true
+# eframe 0.36 (and its egui 0.36 tree) requires 1.95; the rest of the workspace stays at 1.85.
+rust-version = "1.95"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# `std` provides the `Scalar`/`Field` impl for `f64`; the workspace dependency disables
+# default features.
+robot-motion = { workspace = true, features = ["std"] }
+
+# eframe 0.36 is the release that pairs with egui 0.36, the version bevy_egui already
+# pins in this workspace. egui_plot 0.37 is the release for egui 0.36 (its 0.36 release
+# still targets egui 0.35).
+eframe = "=0.36.0"
+egui_plot = "=0.37.0"
+
+[lints.rust]
+unsafe_code = "forbid"

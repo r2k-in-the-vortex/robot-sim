@@ -37,6 +37,21 @@ Python suites that check it.
 cargo run -p robot-app --release
 ```
 
+### Motion planner demo
+
+```powershell
+cargo run -p robot-motion-demo
+```
+
+A 1-DOF test bench for the planners in `robot-motion`. Edit the velocity,
+acceleration and jerk limits and the boundary states, then read the planned
+position, velocity, acceleration and jerk from four linked time-series graphs.
+The optimal, conservative and general planners can be compared; the general
+mode exposes the full `(q, v, a)` vector at both boundaries and shows the exact
+stop–move–start viability check, including why an infeasible state is rejected.
+A timeline scrubs through the profile, and the phase table lists every
+constant-jerk segment.
+
 ## Using the simulator
 
 ### 3D View tab
@@ -142,6 +157,7 @@ The derivation is in the *Inverse kinematics* section of
 | `crates/robot-kinematics` | DH transforms, forward kinematics, closed-form inverse kinematics |
 | `crates/robot-dynamics` | Wrench frame algebra, gravity and inertia compensation |
 | `crates/robot-motion` | Jerk-limited S-curve planning, synchronization, tracking and supervision |
+| `crates/robot-motion-demo` | Interactive 1-DOF planner test bench: limits and boundary states in, planned q/v/a/j graphs out |
 | `crates/robot-model` | Parameter types and `robot_parameters.json` persistence |
 | `crates/robot-app` | Bevy + egui desktop application |
 | `crates/robot-golden` | Exact rational arithmetic and the Lean numeral format, for tests |

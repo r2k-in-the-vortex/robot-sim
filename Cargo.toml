@@ -6,6 +6,7 @@ members = [
     "crates/robot-dynamics",
     "crates/robot-model",
     "crates/robot-motion",
+    "crates/robot-motion-demo",
     "crates/robot-app",
     "xtask",
 ]
