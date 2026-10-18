@@ -198,6 +198,44 @@ Not proved, and not claimed:
   re-expressing the float kernels in Lean and proving the bounds there — a research-grade
   effort, out of proportion to the risk it would retire, and not attempted here.
 
+## Motion control
+
+`lean/Motion/` is the specification of the jerk-limited motion layer; `crates/robot-motion`
+is the implementation. The part of the mathematics that is polynomial — `State`,
+`Segment`, `Profile`, evaluation, stretch, synchronization — is stated over an arbitrary
+`Field` in Rust, so the exact-rational type runs the same code as production and the golden
+tests compare it with `==`. The **conservative** planner is radical-free and `Field`-generic
+for the same reason; its durations and jerk values are exact over `ℚ`.
+
+The **optimal** 7-phase planner needs `sqrt`/`cbrt`, so it is `f64`-only. Its golden data is
+still exact (constructed from rational durations/peaks), but the planner comparison uses the
+declared `1e-12` relative/absolute tolerance. This is the same real-versus-`f64` boundary as
+the rest of the port: the Lean specification is over `ℝ`, and nothing here claims a proof
+about the floating-point values.
+
+The **conservative M1-default** planner's full ladder — boundary conditions, feasibility,
+`C²` smoothness, monotonicity, total-time sign, the seven-slot bound and shape — is proved in
+`Motion.Plan.Conservative`. Stretching, synchronisation, the synchronised stop and the scalar
+MoveJ are proved in `Motion.Sync` and `Motion.MoveJ`; their Rust counterparts are exercised by
+the exact-rational sync/stretch cases and by `tests/sync.rs`. The M1-opt radical-case Lean
+proofs remain staged; the Rust optimal planner is implemented and tolerance-tested.
+
+The **general** stop–move–start planner rejects exactly the states outside its own viability
+predicate (`stop_feasible` at the start and at the time-reversed target); the Lean module
+proves the constructive contract (stop/start feasibility, `planGeneral` boundary,
+feasibility, the exact `isSome ↔ Viable` statement and the 15-segment bound). That is not a
+global infeasibility certificate: a direct profile that never passes through rest can exist
+outside it, and the arbitrary-profile necessity half (`stopFeasible_necessary`) is a named
+gap. The tracker/supervisor tests are a headless plant model, not a theorem about a
+physical robot; the kinematic error growth under a position clamp and a monotone reference
+is proved in `Motion.Supervisor` (`stall_error_grows` and the finite-time crossing
+corollary), but the saturation-dependent stall decision remains a simulation property.
+
+What is deliberately not attempted: arm dynamics and torque limits (the repository has no
+mass matrix or torque model), true time-optimal path parameterization, position-limit
+enforcement in the planner, and a tracking-error bound for `f64`. The M5 Cartesian mode is a
+conditional feasibility certificate whose path derivative bounds are sampled, not proved.
+
 ## Summary
 
 | Layer | Checked against | Strength |

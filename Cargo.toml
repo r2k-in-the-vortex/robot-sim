@@ -5,6 +5,7 @@ members = [
     "crates/robot-golden",
     "crates/robot-dynamics",
     "crates/robot-model",
+    "crates/robot-motion",
     "crates/robot-app",
     "xtask",
 ]
@@ -21,6 +22,7 @@ robot-kinematics = { path = "crates/robot-kinematics", default-features = false 
 robot-dynamics = { path = "crates/robot-dynamics", default-features = false }
 robot-golden = { path = "crates/robot-golden" }
 robot-model = { path = "crates/robot-model" }
+robot-motion = { path = "crates/robot-motion", default-features = false }
 
 # The configuration document's file format: `robot_parameters.json` is read with
 # `serde_json`'s parser and written with its pretty printer, which is the one Rust

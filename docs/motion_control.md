@@ -970,6 +970,7 @@ theorem comp_bounds
   (M1 M2 M3 S1 S2 S3 L1 L2 L3 : ℝ)
   (hf : ContDiffOn ℝ 3 f (Set.Ioo a b))
   (hσ : ContDiffOn ℝ 3 σ (Set.Ioo a b))
+  (hσmaps : Set.MapsTo σ (Set.Ioo a b) (Set.Ioo a b))
   (hf1 : ∀ t ∈ Set.Ioo a b, |deriv f t| ≤ M1)
   (hf2 : ∀ t ∈ Set.Ioo a b, |iteratedDeriv 2 f t| ≤ M2)
   (hf3 : ∀ t ∈ Set.Ioo a b, |iteratedDeriv 3 f t| ≤ M3)
@@ -990,6 +991,12 @@ The chain-rule identities are `(f∘σ)' = f'σ'`,
 `iteratedDeriv_comp_two` and `iteratedDeriv_comp_three` in
 `Mathlib/Analysis/Calculus/IteratedDeriv/FaaDiBruno.lean`; the proof is the triangle
 inequality after those rewrites.
+
+`hσmaps` is necessary, not decorative: the derivative bounds are only known on `(a,b)`,
+while the chain rule evaluates them at `σ t`. Without `σ(Ioo a b) ⊆ Ioo a b` the statement
+is false (take `f` vanishing on `(-∞,1]` and `σ t = t+10` on `(0,1)`). The supervisor's
+affine clock `σ(t)=t/k` maps `(0,b)` into `(0,b)` for `k ≥ 1`; the Cartesian instance
+carries the same condition as `hsmap`.
 
 Apply `comp_bounds` on an open interval where both `f` and `σ` are `C³`; for a profile,
 that is the interior of one segment, and the endpoint bounds follow by continuity. The
@@ -1148,23 +1155,26 @@ equation of `t_r`, `t_a`, `t_c` or `v_p` to close the displacement sum.
 
 ```
 lean/
-  Motion.lean                  -- imports Motion.Basic ... Motion.Cartesian
+  Motion.lean                  -- imports the modules below
   Motion/
-    Basic.lean                 -- State, Limits, Segment, Profile, transforms, Feasible
-    Glue.lean                  -- piecewise C² gluing, planner smoothness
-    Plan.lean                  -- M1-opt: d, case split, planRestToRest
-    Plan/Common.lean           -- d, D_full, case predicates, shared arithmetic
+    Basic.lean                 -- State, Limits, Segment, Profile, evalFrom, Feasible
+    Glue.lean                  -- piecewise C² gluing
+    Smooth.lean                -- derivatives and smoothness of evalFrom
+    Transforms.lean            -- append/translate/mirror/stretch/reverse
     Plan/Conservative.lean     -- M1-default: rational template
-    Plan/Full.lean             -- Case A (full with cruise, triangular with cruise)
-    Plan/NoCruise.lean         -- Case B
-    Plan/Triangular.lean       -- Case C
     General.lean               -- stop/brake/start, planGeneral
     Compose.lean               -- comp_bounds (chain rule + triangle inequality)
-    Sync.lean                  -- IsRest, syncTime, hold, stretchTo, synchronize
+    Sync.lean                  -- IsRest, syncTime, hold, stretchTo, synchronize,
+                               --   synchronizedStop
     MoveJ.lean                 -- movejScalar
-    Cartesian.lean             -- conditional certificate theorem
+    Supervisor.lean            -- stall_error_grows, stall_error_crosses
   MotionTestData.lean          -- generator (lean_exe, outside defaultTargets)
 ```
+
+The M1-opt files (`Plan.lean`, `Plan/Common.lean`, `Plan/Full.lean`, `Plan/NoCruise.lean`,
+`Plan/Triangular.lean`) and the M5 `Cartesian.lean` are staged, not present: the Rust
+optimal planner is implemented and golden-tested, and `comp_bounds` is proved here, but
+the radical-case Lean proofs and the sampled Cartesian certificate are future work (§4.8).
 
 Each file follows the repository's Lean module convention (`module`, `public import`,
 `@[expose] public section`) exactly as `Kinematics.lean` does. Without `@[expose]`, the
@@ -1250,6 +1260,35 @@ Proof risks, in descending order:
 - **Lean extrapolates, Rust clamps.** `evalFrom` extends the last cubic past `T`; Rust's
   `eval` clamps. The divergence is outside `[0,T]` and documented in the map; golden
   samples stay inside the interval.
+
+### 4.8 Execution status (2026-10-18)
+
+The core 1-DOF plan is landed. `lake build` covers every module under `lean/Motion/`
+and the CI no-`sorry`/`axiom` grep over `Motion/` and `Motion.lean` passes.
+
+| Module | Landed |
+| --- | --- |
+| `Basic`, `Glue`, `Smooth`, `Transforms` | representation, evaluation, feasibility bridge, append/translate/mirror/stretch/reverse, piecewise-`C²` gluing, `evalFrom` derivative and smoothness lemmas |
+| `Plan/Conservative` | the full M1-default ladder: boundary, `IsRest`, feasibility, `ContDiffOn 2`, monotonicity, total-time sign, `length ≤ 7`, seven-slot shape |
+| `General` | `stopFeasible`, `viable`, the Rust-mirroring `stopProfile`/`startProfile`, `planGeneral`, and its boundary/feasibility/`isSome`/length theorems |
+| `Sync` | `IsRest`, `hold`, `syncTime`, `stretchTo`, `JointProfile`, `synchronize`, the M3 theorem table, and the synchronised-stop construction |
+| `MoveJ` | scalar MoveJ with effective limits, path/boundary/feasibility theorems |
+| `Supervisor` | `stall_error_grows` and the finite-time crossing corollary |
+| `Compose` | `comp_bounds` and `comp_bounds_on_feasible` |
+
+The Rust crate implements and tests the same layer end to end: `cargo test --workspace`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, the
+`no_std`/libm build, and the committed `test_data/motion_profiles.json` goldens all pass.
+
+Deliberately staged or out of scope, with the gap named in `docs/lean-rust-map.md`:
+
+- Lean proofs for the M1-opt radical cases (A′/B/C); Rust implements and golden-tests the
+  optimal planner, and `planRestConservative` is the verified default.
+- `stopFeasible_necessary` (the arbitrary-profile necessity direction of M2); the
+  constructive contract and the exact `planGeneral_isSome_iff` are proved.
+- The M5 Cartesian certifier; `comp_bounds` is proved, the sampled path bounds are not.
+- Full supervisor stall soundness (including command saturation), which remains a
+  simulation property in M4; only the kinematic error-growth lemma is a theorem.
 
 ---
 
@@ -1459,8 +1498,12 @@ for any `k > 0`, so the Rust domain is deliberately narrower (the supervisor onl
 `src/general.rs` mirrors `Motion/General.lean`: `rev`, `stop_feasible`, `stop_profile`,
 `start_profile`, `append`, `plan_general`. The middle uses `plan_rest_conservative` by
 default, matching the Lean proof; the optimal planner can be substituted once M1-opt is
-accepted. `append` returns `Result` if capacity would be exceeded; the general planner's
-construction stays within 15 by the bound in §3.5.
+accepted. The f64 implementation concatenates the three segment lists directly rather than
+using `Profile::append`'s exact junction check: the intermediate positions can differ by
+rounding, while the junction velocities and accelerations are zero. `append` remains the
+exact-rational/API operation and is tested over `Ratio`. `append` returns `Result` if
+capacity would be exceeded; the general planner's construction stays within 15 by the
+bound in §3.5.
 
 ### 5.4 Tracker and supervisor
 

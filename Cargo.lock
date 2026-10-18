@@ -5113,6 +5113,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "robot-motion"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "proptest",
+ "robot-golden",
+ "robot-kinematics",
+ "serde_json",
+]
+
+[[package]]
 name = "rodio"
 version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -75,7 +75,9 @@ jobs:
       # the standard library has to keep building. It is a separate target because
       # nothing else in the workspace exercises it.
       - name: Build the no_std configuration
-        run: cargo build -p robot-kinematics --no-default-features --features libm
+        run: |
+          cargo build -p robot-kinematics --no-default-features --features libm
+          cargo build -p robot-motion --no-default-features --features libm
 
   lean-build:
     name: Lean build and ground truth
@@ -117,6 +119,15 @@ jobs:
           lake exe kinematics_test_data ../test_data/kinematics_frames.json
           lake exe force_torque_test_data ../test_data/force_torque_frames.json
           lake exe branch_decision_q ../test_data/branch_plans.json
+          lake exe motion_test_data ../test_data/motion_profiles.json
+
+      - name: No sorry or axiom in the motion proof libraries
+        working-directory: lean
+        run: |
+          if grep -RInE '\b(sorry|axiom)\b' Motion Motion.lean; then
+            echo "the motion proof libraries must stay complete"
+            exit 1
+          fi
 
       - name: Check the ground truth has not drifted
         run: git diff --exit-code -- test_data

@@ -141,6 +141,7 @@ The derivation is in the *Inverse kinematics* section of
 | --- | --- |
 | `crates/robot-kinematics` | DH transforms, forward kinematics, closed-form inverse kinematics |
 | `crates/robot-dynamics` | Wrench frame algebra, gravity and inertia compensation |
+| `crates/robot-motion` | Jerk-limited S-curve planning, synchronization, tracking and supervision |
 | `crates/robot-model` | Parameter types and `robot_parameters.json` persistence |
 | `crates/robot-app` | Bevy + egui desktop application |
 | `crates/robot-golden` | Exact rational arithmetic and the Lean numeral format, for tests |
