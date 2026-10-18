@@ -45,5 +45,5 @@ pub use plan::plan_rest_to_rest;
 pub use plant::{JointPlant, PlantConfig};
 pub use profile::{JointProfile, Limits, MAX_PHASES, PlanKind, Profile, Segment, State};
 pub use supervisor::{Decision, Supervisor, SupervisorConfig};
-pub use sync::{plan_movej_scalar, synchronize};
+pub use sync::{plan_movej_scalar, plan_movej_scalar_optimal, synchronize};
 pub use tracker::{Command, Tracker, TrackingGains};

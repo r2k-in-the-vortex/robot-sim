@@ -14,9 +14,10 @@ It doesn't have to be a frontier model when validations and testing are good eno
 
 A desktop application that simulates a 6-axis articulated robot arm. It draws the
 arm as a chain of Denavit–Hartenberg frames in an interactive 3D view, can overlay
-an STL mesh on the base and on each joint, and moves the arm either joint by joint
-or by jogging the end effector in Cartesian space. Cartesian and rotation jogs are
-solved with a closed-form inverse kinematics derived for this arm's structure.
+an STL mesh on the base and on each joint, and moves the arm joint by joint, by
+jogging the end effector in Cartesian space, or through a queue of joint-space
+motion commands. Cartesian and rotation jogs are solved with a closed-form inverse
+kinematics derived for this arm's structure.
 
 The mathematics behind it is written out in [`mathematics.md`](docs/mathematics.md) and
 proved in Lean under [`lean/`](lean) — see [Mathematics](#mathematics) below.
@@ -72,7 +73,7 @@ before.
 
 ### Parameters tab
 
-Two sub-tabs, **DH Parameters** and **Meshes**.
+Three sub-tabs, **DH Parameters**, **Meshes** and **Motion limits**.
 
 **DH Parameters.** DH values are editable per joint. Angles are entered in
 degrees, while `d`, `a`, and mesh offsets use consistent model units. The DH
@@ -97,7 +98,14 @@ in that order, in degrees. Opacity ranges from 0 (transparent) to 1 (opaque).
 Use **Show triangle edges** to toggle mesh outlines; it is off by default. Apply
 changes to update the view.
 
-**Save JSON** and **Load JSON** persist all DH and mesh settings in
+**Motion limits.** The physical velocity, acceleration and jerk ceiling of each
+joint, in degrees and seconds, one row per joint. These are the robot's own
+limits: a motion command carries its own V/A/J request, and the effective limit
+is the tighter of the two. A command below the physical limits runs exactly as
+written; one that asks for more is capped, and the Motion tab names the capped
+components.
+
+**Save JSON** and **Load JSON** persist all DH, mesh and motion-limit settings in
 `robot_parameters.json`; mesh paths are stored relative to the configuration
 file when possible. The included DH values are illustrative starter dimensions
 that match the shipped `robot_parameters.json`, not measurements for a specific
@@ -137,6 +145,42 @@ in the clipboard text; a joint inside ±360° reads exactly as it does in the
 Python. A pose jog keeps that winding: the solved configuration is placed
 beside the angles the arm is holding, so a jog from a wound joint implies at
 most a half turn of motion rather than a whole turn back to its wrapped angle.
+
+### Motion tab
+
+The Motion tab builds and runs **MoveJ** commands: a straight line in joint
+space, one synchronized S-curve for all six joints, so every joint starts and
+stops together and the slowest one sets the pace. The 3D view stays visible in
+the center; the command editor and queue are on the left and the live graphs
+are along the bottom.
+
+Set the start and stop joint angles in degrees (J1–J6) and the command's
+velocity, acceleration and jerk request. **From current** fills the start from
+the arm's present pose; **From last queued** fills it from the end of the last
+queued command. Adding a command chains the next draft's start to the stop just
+added. The effective-limits table shows the per-joint values after the physical
+limits cap the request, and the amber line names every capped component.
+
+**Add to queue** appends the draft. The queue lists each command with its
+planned duration; **Remove**, **Clear queue**, **Play all**, **Pause/Resume**,
+**Stop** and **Refresh preview** run it. When the first command starts away from
+the arm's current pose — or when an edit leaves a gap between commands — the
+player inserts a transition MoveJ from the current pose to that start. The
+transition is part of the executed plan and the graphs, not part of the queue
+JSON. Commands are rest-to-rest, so the arm reaches zero velocity at each
+junction; waypoint blending is a future command type.
+
+**Command JSON** and **Queue JSON** are copyable and loadable. A command is one
+`{"type": "movej", ...}` object; a queue is
+`{"schema": "robot-app.motion-queue", "version": 1, "commands": [...]}` (a bare
+array is accepted too). Loading validates and plans first, so a malformed queue
+leaves the existing one untouched.
+
+The graphs show joint angles, tool XYZ and unwrapped ZYX orientation over the
+whole planned motion, with a cursor at the playback time. The arm in the 3D
+view, the Parameters-tab joint fields, and the cursor all describe the same
+instant. Only MoveJ is implemented; Cartesian lines, arcs and waypoint blending
+are planned.
 
 ## Inverse kinematics
 

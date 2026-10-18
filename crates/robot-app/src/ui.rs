@@ -1,7 +1,8 @@
 //! The egui shell: the tab strip, the 3D view's side panel and the parameter pages.
 //!
-//! The two top-level tabs and the parameter sub-tabs are the reference layout
-//! (`simulator.py:186-188` for the tabs, `:438-441` for the sub-tabs). The tables here are
+//! The reference's two top-level tabs and parameter sub-tabs (`simulator.py:186-188` for
+//! the tabs, `:438-441` for the sub-tabs), plus the Motion tab and the Motion limits
+//! sub-tab this app adds. The tables here are
 //! editable and every button is wired: the fields live in [`crate::session`], which owns the
 //! operations they drive and the rules about which of them take effect when, and this module
 //! only lays them out and calls across.
@@ -22,24 +23,29 @@ use robot_model::{AXIS_FRAME_NAMES, FRAME_COUNT, MESH_FRAME_NAMES};
 use crate::camera::OrbitCamera;
 use crate::dialogs;
 use crate::jog::Axis;
+use crate::motion::MotionRuntime;
+use crate::motion_ui;
 use crate::scene::{GIZMO_LENGTH_FRACTION, LABEL_COLOR, LABEL_LIFT_FRACTION, LinkMeshes};
 use crate::session::{self, INVALID_PARAMETERS_TITLE, Session, rotation_to_rpy_degrees};
 use crate::{RobotState, ViewState};
 
-/// The two tabs of `simulator.py:188-189`.
+/// The reference's two tabs (`simulator.py:188-189`) plus the Motion tab.
 #[derive(Resource, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Tab {
     #[default]
     View,
     Parameters,
+    Motion,
 }
 
-/// The two sub-tabs of `simulator.py:440-441`.
+/// The parameter sub-tabs: the reference's two (`simulator.py:440-441`) plus the motion
+/// limits the Rust app adds.
 #[derive(Resource, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ParameterTab {
     #[default]
     Dh,
     Meshes,
+    Motion,
 }
 
 /// The rect the 3D renderer owns, as measured by the UI pass.
@@ -78,6 +84,7 @@ pub fn draw_shell(
     mut view: ResMut<ViewState>,
     mut robot: ResMut<RobotState>,
     mut session: ResMut<Session>,
+    mut motion: ResMut<MotionRuntime>,
     link_meshes: Res<LinkMeshes>,
     mut viewport: ResMut<Viewport>,
 ) -> Result {
@@ -106,6 +113,7 @@ pub fn draw_shell(
                 ui.separator();
                 ui.selectable_value(&mut *tab, Tab::View, "3D View");
                 ui.selectable_value(&mut *tab, Tab::Parameters, "Parameters");
+                ui.selectable_value(&mut *tab, Tab::Motion, "Motion");
             });
             ui.add_space(2.0);
         })
@@ -122,7 +130,7 @@ pub fn draw_shell(
             let controls = egui::Panel::left("view_controls")
                 .default_size(240.0)
                 .show(&mut root, |ui| {
-                    view_controls(ui, &mut view, &mut robot, &mut session)
+                    view_controls(ui, &mut view, &mut robot, &mut session, motion.active)
                 })
                 .response
                 .rect;
@@ -161,7 +169,46 @@ pub fn draw_shell(
                 &mut robot,
                 &mut session,
                 &link_meshes,
+                motion.active,
             );
+        }
+        Tab::Motion => {
+            motion.ensure_preview(
+                &robot.document.parameters,
+                &robot.document.motion_limits,
+                robot.runtime_angles_deg,
+            );
+            let controls = egui::Panel::left("motion_controls")
+                .resizable(true)
+                .default_size(340.0)
+                .min_size(300.0)
+                .max_size(520.0)
+                .show(&mut root, |ui| {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| motion_ui::controls(ui, &mut motion, &robot));
+                })
+                .response
+                .rect;
+            // Shown after the left panel, so the plots occupy the width beside the
+            // controls rather than running under them.
+            let plots = egui::Panel::bottom("motion_plots")
+                .resizable(true)
+                .default_size(280.0)
+                // A content-sized bottom panel would collapse to the empty-state line
+                // before a plan exists; the minimum reserves a readable graph height.
+                .min_size(240.0)
+                .max_size((screen.height() * 0.7).max(200.0))
+                .show(&mut root, |ui| motion_ui::plots(ui, &motion))
+                .response
+                .rect;
+            central.min.x = controls.max.x;
+            central.max.y = plots.min.y;
+            // Consumed exactly once; the next plan rebuild sets it again.
+            motion.reset_plots = false;
+            if robot.document.show_joint_labels {
+                draw_labels(&root, central, &robot, &view.camera, view.grid_radius);
+            }
         }
     }
 
@@ -222,6 +269,7 @@ fn view_controls(
     view: &mut ViewState,
     robot: &mut RobotState,
     session: &mut Session,
+    motion_active: bool,
 ) {
     ui.add_space(4.0);
     ui.heading("View");
@@ -237,6 +285,9 @@ fn view_controls(
     ui.separator();
 
     ui.heading("Jog");
+    if motion_active {
+        ui.label(egui::RichText::new("A motion is running; the jog buttons are disabled.").small());
+    }
     ui.add_space(2.0);
     egui::Grid::new("jog_steps")
         .num_columns(2)
@@ -251,66 +302,73 @@ fn view_controls(
         });
     ui.add_space(6.0);
 
-    // `simulator.py:251-256`'s two frame groups, in its order.
+    // `simulator.py:251-256`'s two frame groups, in its order. A motion owns the runtime
+    // angles while it is active, so every pose writer is disabled beside the note above.
     egui::Frame::group(ui.style()).show(ui, |ui| {
-        frame_jog_buttons(
-            ui,
-            "Base frame",
-            session,
-            robot,
-            Session::jog_cartesian,
-            Session::jog_rotation_world,
-        );
+        ui.add_enabled_ui(!motion_active, |ui| {
+            frame_jog_buttons(
+                ui,
+                "Base frame",
+                session,
+                robot,
+                Session::jog_cartesian,
+                Session::jog_rotation_world,
+            );
+        });
     });
     egui::Frame::group(ui.style()).show(ui, |ui| {
-        frame_jog_buttons(
-            ui,
-            "Tool frame",
-            session,
-            robot,
-            Session::jog_tool_translation,
-            Session::jog_rotation_tool,
-        );
+        ui.add_enabled_ui(!motion_active, |ui| {
+            frame_jog_buttons(
+                ui,
+                "Tool frame",
+                session,
+                robot,
+                Session::jog_tool_translation,
+                Session::jog_rotation_tool,
+            );
+        });
     });
     ui.add_space(6.0);
 
     egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.label(egui::RichText::new("Joint jogs").strong());
-        ui.horizontal(|ui| {
-            ui.label("Joint step");
-            step_field(ui, &mut session.joint_step);
-            ui.separator();
-            for joint in 0..JOINT_COUNT {
-                ui.vertical(|ui| {
-                    ui.label(format!("J{}", joint + 1));
-                    ui.horizontal(|ui| {
-                        if ui.small_button("-").clicked() {
-                            session.jog_joint(
-                                joint,
-                                -1,
-                                &mut robot.document,
-                                &mut robot.runtime_angles_deg,
-                            );
-                        }
-                        if ui.small_button("+").clicked() {
-                            session.jog_joint(
-                                joint,
-                                1,
-                                &mut robot.document,
-                                &mut robot.runtime_angles_deg,
-                            );
-                        }
+        ui.add_enabled_ui(!motion_active, |ui| {
+            ui.label(egui::RichText::new("Joint jogs").strong());
+            ui.horizontal(|ui| {
+                ui.label("Joint step");
+                step_field(ui, &mut session.joint_step);
+                ui.separator();
+                for joint in 0..JOINT_COUNT {
+                    ui.vertical(|ui| {
+                        ui.label(format!("J{}", joint + 1));
+                        ui.horizontal(|ui| {
+                            if ui.small_button("-").clicked() {
+                                session.jog_joint(
+                                    joint,
+                                    -1,
+                                    &mut robot.document,
+                                    &mut robot.runtime_angles_deg,
+                                );
+                            }
+                            if ui.small_button("+").clicked() {
+                                session.jog_joint(
+                                    joint,
+                                    1,
+                                    &mut robot.document,
+                                    &mut robot.runtime_angles_deg,
+                                );
+                            }
+                        });
+                        // `_sync_joint_angle_views`'s front readout (`simulator.py:325`), plus the
+                        // winding annotation once the joint has wound a whole turn.
+                        ui.label(
+                            egui::RichText::new(session::front_readout(
+                                robot.runtime_angles_deg[joint],
+                            ))
+                            .small(),
+                        );
                     });
-                    // `_sync_joint_angle_views`'s front readout (`simulator.py:325`), plus the
-                    // winding annotation once the joint has wound a whole turn.
-                    ui.label(
-                        egui::RichText::new(session::front_readout(
-                            robot.runtime_angles_deg[joint],
-                        ))
-                        .small(),
-                    );
-                });
-            }
+                }
+            });
         });
     });
 
@@ -485,20 +543,23 @@ fn parameter_page(
     robot: &mut RobotState,
     session: &mut Session,
     link_meshes: &LinkMeshes,
+    motion_active: bool,
 ) {
     ui.horizontal(|ui| {
         ui.selectable_value(parameter_tab, ParameterTab::Dh, "DH Parameters");
         ui.selectable_value(parameter_tab, ParameterTab::Meshes, "Meshes");
+        ui.selectable_value(parameter_tab, ParameterTab::Motion, "Motion limits");
     });
     ui.separator();
     egui::ScrollArea::vertical().show(ui, |ui| match parameter_tab {
-        ParameterTab::Dh => dh_page(ui, robot, session),
-        ParameterTab::Meshes => mesh_page(ui, robot, session, link_meshes),
+        ParameterTab::Dh => dh_page(ui, robot, session, motion_active),
+        ParameterTab::Meshes => mesh_page(ui, robot, session, link_meshes, motion_active),
+        ParameterTab::Motion => motion_limits_page(ui, robot, session, motion_active),
     });
 }
 
 /// `simulator.py:443-508`.
-fn dh_page(ui: &mut egui::Ui, robot: &mut RobotState, session: &mut Session) {
+fn dh_page(ui: &mut egui::Ui, robot: &mut RobotState, session: &mut Session, motion_active: bool) {
     ui.add_space(4.0);
     ui.heading("Denavit–Hartenberg parameters");
     ui.label("Theta offset and joint angle are in degrees; d and a use consistent length units.");
@@ -543,13 +604,15 @@ fn dh_page(ui: &mut egui::Ui, robot: &mut RobotState, session: &mut Session) {
 
     ui.add_space(12.0);
     ui.horizontal(|ui| {
-        if ui.button("Apply to View").clicked() {
-            if let Err(failure) =
-                session.apply_from_entries(&mut robot.document, &mut robot.runtime_angles_deg)
-            {
-                session.notice = Some(failure);
+        ui.add_enabled_ui(!motion_active, |ui| {
+            if ui.button("Apply to View").clicked() {
+                if let Err(failure) =
+                    session.apply_from_entries(&mut robot.document, &mut robot.runtime_angles_deg)
+                {
+                    session.notice = Some(failure);
+                }
             }
-        }
+        });
         if ui.button("Save JSON").clicked() {
             save_json(session, robot);
         }
@@ -643,6 +706,88 @@ fn load_json(session: &mut Session, robot: &mut RobotState) {
     }
 }
 
+/// The per-joint physical motion limits page.
+///
+/// These are the robot's own ceilings, not a command's. A motion command carries its own
+/// V/A/J request; the effective limit is the tighter of the two, so a command that asks
+/// for less than the joint allows runs exactly as written and one that asks for more is
+/// capped. The Motion tab shows where a cap is active.
+fn motion_limits_page(
+    ui: &mut egui::Ui,
+    robot: &mut RobotState,
+    session: &mut Session,
+    motion_active: bool,
+) {
+    ui.add_space(4.0);
+    ui.heading("Joint motion limits");
+    ui.label(
+        "Physical velocity, acceleration and jerk ceilings per joint, in degrees and \
+         seconds. A motion command's own limits are capped by these; a command below them \
+         is left alone.",
+    );
+    ui.add_space(8.0);
+
+    egui::Grid::new("motion_limits_table")
+        .num_columns(4)
+        .spacing([16.0, 6.0])
+        .show(ui, |ui| {
+            for heading in [
+                "Joint",
+                "Velocity (deg/s)",
+                "Acceleration (deg/s²)",
+                "Jerk (deg/s³)",
+            ] {
+                ui.label(egui::RichText::new(heading).strong());
+            }
+            ui.end_row();
+
+            for (joint, fields) in session.motion_limits.iter_mut().enumerate() {
+                ui.label(format!("J{}", joint + 1));
+                for (field, (name, unit)) in fields.iter_mut().zip([
+                    ("velocity", "deg/s"),
+                    ("acceleration", "deg/s²"),
+                    ("jerk", "deg/s³"),
+                ]) {
+                    ui.add(
+                        egui::TextEdit::singleline(field)
+                            .desired_width(96.0)
+                            .hint_text(format!("{name} {unit}")),
+                    );
+                }
+                ui.end_row();
+            }
+        });
+
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(!motion_active, |ui| {
+            if ui.button("Apply to View").clicked() {
+                if let Err(failure) =
+                    session.apply_from_entries(&mut robot.document, &mut robot.runtime_angles_deg)
+                {
+                    session.notice = Some(failure);
+                }
+            }
+        });
+        if ui.button("Save JSON").clicked() {
+            save_json(session, robot);
+        }
+        if ui.button("Load JSON").clicked() {
+            load_json(session, robot);
+        }
+    });
+    ui.label(
+        egui::RichText::new(format!(
+            "File: {} · Motion limits are saved with the DH table and mesh settings.",
+            session
+                .config_path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+        ))
+        .small(),
+    );
+}
+
 /// The mesh table's STL column, in points, on a page `available` points wide.
 ///
 /// The reference makes this the table's one flexible column — `simulator.py:565` gives it
@@ -672,6 +817,7 @@ fn mesh_page(
     robot: &mut RobotState,
     session: &mut Session,
     link_meshes: &LinkMeshes,
+    motion_active: bool,
 ) {
     ui.add_space(4.0);
     ui.heading("Frame-attached STL meshes");
@@ -727,13 +873,15 @@ fn mesh_page(
     ui.label(link_meshes.status.as_str());
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        if ui.button("Apply Meshes").clicked() {
-            if let Err(failure) =
-                session.apply_from_entries(&mut robot.document, &mut robot.runtime_angles_deg)
-            {
-                session.notice = Some(failure);
+        ui.add_enabled_ui(!motion_active, |ui| {
+            if ui.button("Apply Meshes").clicked() {
+                if let Err(failure) =
+                    session.apply_from_entries(&mut robot.document, &mut robot.runtime_angles_deg)
+                {
+                    session.notice = Some(failure);
+                }
             }
-        }
+        });
         if ui.button("Save JSON").clicked() {
             save_json(session, robot);
         }

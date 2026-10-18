@@ -2,10 +2,12 @@
 //! and an egui shell around it.
 //!
 //! The window is the reference's (`simulator.py:168-170`): "6-Axis Robot Simulator",
-//! 1120x760, no smaller than 820x600. Inside it the layout is the same two tabs
-//! (`simulator.py:186-189`), with the 3D view on the first one and the parameter pages on
-//! the second. The UI itself lives in [`ui`]; this module is the wiring — the resources the
-//! view and the shell share, the two cameras, and the order the systems run in.
+//! 1120x760, no smaller than 820x600. Inside it are the reference's two tabs
+//! (`simulator.py:186-189`) — the 3D view and the parameter pages — plus the Motion tab,
+//! which keeps the 3D view in its central rect and adds the command editor, queue and
+//! planned-motion graphs around it. The UI itself lives in [`ui`]; this module is the
+//! wiring — the resources the view and the shell share, the two cameras, and the order the
+//! systems run in.
 //!
 //! # The two cameras
 //!
@@ -21,6 +23,8 @@ mod camera;
 mod dialogs;
 mod jog;
 mod mesh;
+mod motion;
+mod motion_ui;
 mod pyformat;
 mod scene;
 mod session;
@@ -187,7 +191,8 @@ fn main() -> AppExit {
         .init_resource::<ParameterTab>()
         .init_resource::<Viewport>()
         .init_resource::<LinkMeshes>()
-        .init_resource::<SceneBounds>();
+        .init_resource::<SceneBounds>()
+        .init_resource::<motion::MotionRuntime>();
 
     app.add_systems(Startup, (setup_cameras, scene::build_scene));
 
@@ -195,6 +200,9 @@ fn main() -> AppExit {
         Update,
         (
             camera_input,
+            // Playback writes the runtime angles; the scene has to read them in the same
+            // frame or the arm trails its graph cursor by one.
+            motion::advance_motion.before(scene::sync_joints),
             scene::sync_joints,
             scene::sync_meshes,
             scene::sync_mesh_edges,
@@ -366,8 +374,12 @@ fn camera_input(
     mut drag: Local<DragState>,
 ) {
     let cursor = window.cursor_position();
-    let in_view =
-        |point: Vec2| *tab == Tab::View && viewport.points.contains(egui::pos2(point.x, point.y));
+    // The Motion tab keeps the 3D view in its central rect, so its camera is draggable
+    // too. Parameters covers the view and still refuses input.
+    let in_view = |point: Vec2| {
+        matches!(*tab, Tab::View | Tab::Motion)
+            && viewport.points.contains(egui::pos2(point.x, point.y))
+    };
 
     match drag.button {
         // The button is what ends the drag, not the position: `_on_mouse_release`

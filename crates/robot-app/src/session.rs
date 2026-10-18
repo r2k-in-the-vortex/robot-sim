@@ -72,7 +72,9 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::Resource;
 use robot_kinematics::{Geometry, GeometryError, JOINT_COUNT, Pose, fk, units};
 use robot_model::table::TableError;
-use robot_model::{DHParameters, DhRow, Document, MESH_COUNT, MeshSettings};
+use robot_model::{
+    DHParameters, DhRow, Document, JointMotionLimits, MESH_COUNT, MeshSettings, MotionLimits,
+};
 
 use crate::jog::{self, Axis};
 use crate::pyformat::{format_g, format_plus_g, format_precision_g};
@@ -161,6 +163,9 @@ pub struct Session {
     /// The six runtime-angle fields, which are *not* the stored angles.
     pub joint_angles: [String; JOINT_COUNT],
     pub meshes: [MeshForm; MESH_COUNT],
+    /// Velocity, acceleration and jerk per joint, in the file's units (degrees and
+    /// seconds). These are the physical ceilings a motion command is capped by.
+    pub motion_limits: [[String; 3]; JOINT_COUNT],
     pub jog_step: String,
     pub rotation_step: String,
     pub joint_step: String,
@@ -181,6 +186,7 @@ impl Session {
             dh: core::array::from_fn(|_| core::array::from_fn(|_| String::new())),
             joint_angles: core::array::from_fn(|_| format_g(0.0)),
             meshes: core::array::from_fn(|_| MeshForm::from_settings(&MeshSettings::default())),
+            motion_limits: core::array::from_fn(|_| core::array::from_fn(|_| String::new())),
             jog_step: String::from("1"),
             rotation_step: String::from("5"),
             joint_step: String::from("5"),
@@ -225,6 +231,9 @@ impl Session {
         if let Ok(meshes) = session.read_meshes() {
             document.meshes = meshes;
         }
+        if let Ok(limits) = session.read_motion_limits() {
+            document.motion_limits = limits;
+        }
 
         let angles = [0.0; JOINT_COUNT];
         session.sync_joint_angles(&angles);
@@ -238,12 +247,27 @@ impl Session {
         for (form, settings) in self.meshes.iter_mut().zip(&document.meshes) {
             *form = MeshForm::from_settings(settings);
         }
+        self.populate_motion_limits(&document.motion_limits);
     }
 
     /// Fill the DH fields, leaving the runtime-angle fields alone.
     pub fn populate_dh(&mut self, parameters: &DHParameters) {
         for (fields, row) in self.dh.iter_mut().zip(parameters.joints) {
             let values = [row.theta_offset_deg, row.d, row.a, row.alpha_deg];
+            for (field, value) in fields.iter_mut().zip(values) {
+                *field = format_g(value);
+            }
+        }
+    }
+
+    /// Fill the physical-limit fields, leaving every other section alone.
+    pub fn populate_motion_limits(&mut self, limits: &MotionLimits) {
+        for (fields, joint) in self.motion_limits.iter_mut().zip(limits.joints) {
+            let values = [
+                joint.velocity_deg_s,
+                joint.acceleration_deg_s2,
+                joint.jerk_deg_s3,
+            ];
             for (field, value) in fields.iter_mut().zip(values) {
                 *field = format_g(value);
             }
@@ -351,6 +375,30 @@ impl Session {
         Ok(settings)
     }
 
+    /// The per-joint physical limits the fields ask for.
+    ///
+    /// Like the DH values, every field is parsed before anything is checked, so a
+    /// non-numeric entry anywhere reports the parse's complaint first. The planner rejects
+    /// a non-positive limit and the file's reader refuses one, so the fields do too rather
+    /// than letting a zero reach a motion command and silently stop a joint.
+    pub fn read_motion_limits(&self) -> Result<MotionLimits, String> {
+        let mut values = [[0.0; 3]; JOINT_COUNT];
+        for (fields, row) in self.motion_limits.iter().zip(values.iter_mut()) {
+            for (text, value) in fields.iter().zip(row.iter_mut()) {
+                *value = parse_float(text)?;
+            }
+        }
+        if !values.iter().flatten().all(|value| value.is_finite()) {
+            return Err(String::from("Motion limits must all be finite numbers."));
+        }
+        if !values.iter().flatten().all(|value| *value > 0.0) {
+            return Err(String::from("Motion limits must all be positive numbers."));
+        }
+        Ok(MotionLimits::new(core::array::from_fn(|joint| {
+            JointMotionLimits::new(values[joint][0], values[joint][1], values[joint][2])
+        })))
+    }
+
     /// A step field's value, `_read_step` (`simulator.py:355-360`).
     pub fn read_step(text: &str, message: &str) -> Result<f64, String> {
         let step = parse_float(text)?;
@@ -382,10 +430,14 @@ impl Session {
         let meshes = self
             .read_meshes()
             .map_err(|message| Failure::new(INVALID_PARAMETERS_TITLE, message))?;
+        let motion_limits = self
+            .read_motion_limits()
+            .map_err(|message| Failure::new(INVALID_PARAMETERS_TITLE, message))?;
 
         *angles = requested;
         document.parameters = parameters;
         document.meshes = meshes;
+        document.motion_limits = motion_limits;
         self.sync_joint_angles(angles);
         Ok(())
     }
@@ -702,6 +754,9 @@ impl Session {
         let meshes = self
             .read_meshes()
             .map_err(|message| Failure::new(INVALID_PARAMETERS_TITLE, message))?;
+        let motion_limits = self
+            .read_motion_limits()
+            .map_err(|message| Failure::new(INVALID_PARAMETERS_TITLE, message))?;
 
         // The flags come from the document, which is where the UI's checkboxes write them
         // live (`simulator.py:691-693` reads the widgets, which is the same thing).
@@ -710,12 +765,14 @@ impl Session {
         // Cloned because the same settings are adopted as the applied state below, and
         // `MeshSettings` is not `Copy`.
         written.meshes = meshes.clone();
+        written.motion_limits = motion_limits;
         written
             .save(path)
             .map_err(|error| Failure::new(COULD_NOT_SAVE_TITLE, error.to_string()))?;
 
         document.parameters = parameters;
         document.meshes = meshes;
+        document.motion_limits = motion_limits;
         self.config_path = path.to_path_buf();
         Ok(format!(
             "Saved to {}.",
@@ -900,6 +957,43 @@ mod tests {
         session.sync_joint_angles(&angles);
         document.parameters = DHParameters::new(session.read_dh_rows().expect("shipped fields"));
         (session, document, angles)
+    }
+
+    #[test]
+    fn the_motion_limit_fields_populate_read_and_apply() {
+        let (mut session, mut document, _angles) = session();
+        assert_eq!(
+            session.read_motion_limits().expect("the defaults read"),
+            MotionLimits::default()
+        );
+
+        document.motion_limits.joints[3] = JointMotionLimits::new(12.0, 34.0, 56.0);
+        session.populate_motion_limits(&document.motion_limits);
+        assert_eq!(session.motion_limits[3], ["12", "34", "56"]);
+        assert_eq!(
+            session.read_motion_limits().expect("valid fields"),
+            document.motion_limits
+        );
+
+        // Applying adopts the edited table, the same way the DH and mesh fields work.
+        let mut target = Document::shipped();
+        let mut angles = [0.0; JOINT_COUNT];
+        session
+            .apply_from_entries(&mut target, &mut angles)
+            .expect("valid fields");
+        assert_eq!(target.motion_limits, document.motion_limits);
+    }
+
+    #[test]
+    fn a_zero_or_malformed_motion_limit_is_refused() {
+        let (mut session, _document, _angles) = session();
+        session.motion_limits[2][0] = String::from("0");
+        assert_eq!(
+            session.read_motion_limits().unwrap_err(),
+            "Motion limits must all be positive numbers."
+        );
+        session.motion_limits[2][0] = String::from("abc");
+        assert!(session.read_motion_limits().is_err());
     }
 
     // --- the display-precision split ------------------------------------------------

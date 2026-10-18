@@ -1446,7 +1446,19 @@ pub fn synchronize<const N: usize, S: Field>(
 pub fn plan_movej_scalar<const N: usize, S: Field>(
     start: [S; N], target: [S; N], limits: [Limits<S>; N],
 ) -> Result<JointProfile<N, S>, PlanError>;
+
+/// The same joint-space-line MoveJ with the time-optimal scalar profile.
+/// f64-only because `plan_rest_to_rest` needs sqrt/cbrt; the app uses this one.
+pub fn plan_movej_scalar_optimal<const N: usize>(
+    start: [f64; N], target: [f64; N], limits: [Limits<f64>; N],
+) -> Result<JointProfile<N, f64>, PlanError>;
 ```
+
+`plan_movej_scalar_optimal` shares the effective-limit computation and the per-joint
+scaling with `plan_movej_scalar`; only the scalar profile constructor differs. The
+conservative template is still the verified default, but its duration has a floor of
+`4·min(1, A/J, V/J)` — four seconds for any non-zero move under typical limits — so the
+interactive app uses the optimal one.
 
 Error types are closed enums: `PlanError::{NonPositiveLimit, NonFiniteInput, Infeasible,
 NumericalFailure, ProfileOverflow}`; `ProfileError::{TooManySegments, NegativeDuration,
@@ -1669,34 +1681,55 @@ rest-to-rest profiles the separate no-overshoot theorem supplies that.
 - No panics on the control path. Capacity errors are returned, not asserted; tests
   exercise the maximal 15-segment general case.
 
-### 5.6 App integration (optional, after M4)
+### 5.6 App integration (implemented)
 
-The app is currently a static kinematic viewer: `RobotState` holds
-`runtime_angles_deg`, and Update systems (`camera_input`, `scene::sync_joints`,
-`scene::sync_meshes`, `scene::sync_mesh_edges`) read it. There is no `Time`,
-`FixedUpdate`, velocity or plant state anywhere in `robot-app`. M4 is therefore a headless
-harness. A later UI pass would:
+The app's Motion tab (issue #13) implements the first command type, `movej`, on top of
+`robot-motion`. It is a **kinematic replay**, not the M4 plant/supervisor harness:
 
-- add a `MotionRuntime` resource next to `RobotState` (`main.rs` around the resource
-  insertion) and a `FixedUpdate` schedule driven by `Time<Fixed>`;
-- call `robot_motion::harness::step`, convert measured radians to degrees with
-  `robot_kinematics::units::rad_to_deg`, and write `runtime_angles_deg`; `scene::sync_joints`
-  then needs no change;
-- add Move/Stop controls and display `Decision`/status in the UI; disable direct joint
-  jogs while a move is active;
-- add `robot-motion.workspace = true` with `std` to `robot-app/Cargo.toml`.
+- `MotionRuntime` (`crates/robot-app/src/motion.rs`) holds the queue, the draft command,
+  the displayed `PlaybackPlan` and the playback clock. `motion::advance_motion` runs in
+  `Update` before `scene::sync_joints`, evaluates the plan at the current time and writes
+  `RobotState::runtime_angles_deg`; the 3D view and the Parameters-tab joint fields follow.
+  The frame delta is capped at 0.1 s so a stall cannot teleport the arm.
+- The app boundary is degrees. Command start/stop and the command's V/A/J are in degrees
+  and seconds; the planner is unit-agnostic, so no conversion is needed. Runtime angles
+  stay continuous and unwrapped: nothing in the motion path calls `wrap_angle` or
+  `nearest_representative`, and a 359° → 361° move is a 2° move.
+- `movej` is the scalar joint-space-line mode, timed with
+  `plan_movej_scalar_optimal`. All joints follow `q_i(t) = q0_i + s(t) Δq_i` and finish
+  together; the slowest joint sets the pace. `plan_movej_scalar` (the conservative verified
+  default) remains in the crate and the exact tests.
+- Every command carries one V/A/J request. `robot_parameters.json` carries a
+  `motion_limits` array with one physical V/A/J row per joint. The effective limit is the
+  component-wise minimum: a command below the physical limits runs exactly as written, and
+  one above them is capped, with the cap shown in the Motion tab. Position limits are not
+  modeled.
+- The queue is the user's authored list. The playback plan inserts transition MoveJs from
+  the current pose whenever a command's start differs from the pose the arm is in — the
+  first command, or a gap after an edit or import. Transitions are **not** written back
+  into the queue, so replaying from a different pose does not accumulate synthetic
+  commands. Commands are rest-to-rest; the arm reaches zero velocity at each junction.
+- Command JSON is one `{"type":"movej", ...}` object; queue JSON is
+  `{"schema":"robot-app.motion-queue","version":1,"commands":[...]}`. Both are
+  copy-pasteable, and the importers are atomic: a queue that fails validation or planning
+  leaves the old one in place.
+- The Motion tab keeps the 3D view in the central rect and puts the command editor and
+  queue on the left, with joint-angle, tool-XYZ and unwrapped-RPY graphs in a bottom
+  panel. The graphs show the whole plan and a cursor at the playback time.
 
-The app boundary is degrees; motion is radians and unwrapped runtime angles. Motion must
-not call `wrap_angle` or `nearest_representative`: a 359° → 361° move is a 2° move, which
-matches the app's winding behavior. The planner's angles are total joint angles, exactly
-as the kinematics crate defines them.
+**Planned command types.** The other three are specified here but not implemented. They
+need a sampled-trajectory segment beside the analytic `JointProfile`s:
 
-**Configuration prerequisite.** `robot_parameters.json` has no `v_max/a_max/j_max` and no
-position limits. M1–M4 take limits as explicit inputs, so they do not need the file. App
-integration (M6) needs a place to store per-joint motion limits — a new settings resource
-or a later `motion` section in the configuration document — and must not infer them from
-the DH table. Position limits, if enforced, are a separate caller-supplied layer; the
-planner does not carry them.
+- `lin`: interpolate the tool pose linearly in position and with a rotation interpolation
+  (slerp or axis-angle) in Cartesian space, sample at a fixed rate, and solve each sample
+  with the existing closed-form IK. Reject a path with an unreachable sample or a branch
+  discontinuity. Joint limits are checked on the sampled joint trajectory.
+- `circle`/`ellipse`: a center, plane normal, two radii, start/end angle and direction
+  define the arc; sample the Cartesian path and solve it the same way. An ellipse segment
+  needs a parameterization decision (arc-length vs. angle) before the schema is fixed.
+- `waypoints`: a pose list plus blend radii; replace each corner with a circular or
+  polynomial blend, then sample and solve. This is the type that removes the rest-to-rest
+  junctions the current `movej` queue necessarily has.
 
 ---
 

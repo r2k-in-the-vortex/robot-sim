@@ -234,6 +234,7 @@ the exact goldens compare with `==`.
 | `Motion.planGeneral` | `plan_general` | `golden_motion.rs` general cases |
 | `Motion.synchronize` | `synchronize` | `golden_motion.rs` sync cases (exact `Ratio`) |
 | `Motion.movejScalar` | `plan_movej_scalar` | `tests/sync.rs` |
+| — (the same composition with the M1-opt scalar profile; app-facing) | `plan_movej_scalar_optimal` | `tests/sync.rs` |
 | `Motion.stall_error_grows` / `stall_error_crosses` | supervisor plant test | `tests/supervisor.rs` (the Rust side is a simulation; only the kinematic growth is a theorem) |
 
 ### Theorem map
@@ -279,6 +280,13 @@ the exact goldens compare with `==`.
 | `synchronize_feasible`, `synchronize_isRest`, `synchronize_totalTime`, `synchronize_endpoints`, `synchronize_rest_to_rest`, `synchronize_zero_motion`, `synchronize_all_zero` | proved |
 | `synchronizedStop_totalTime`, `synchronizedStop_rest_at_Tmax`, `synchronizedStop_feasible`, `synchronizedStop_start` | proved |
 | `movejScalar_boundary`, `movejScalar_boundary_of_moving`, `movejScalar_joint_boundary_of_moving`, `movejScalar_stationary`, `movejScalar_path`, `movejScalar_feasible` | proved |
+
+`plan_movej_scalar_optimal` has no separate Lean definition. It is the same composition —
+effective limits, one scalar profile, per-joint jerk scaled by `Δq_i` — with
+`planRestToRest` in place of `planRestConservative`. The path, boundary and feasibility
+theorems are about the composition; the optimal scalar profile itself carries the M1-opt
+staging note below. The app uses the optimal entry point because the conservative
+template's duration floor is about four seconds for any non-zero move.
 
 **M4 and M5**
 

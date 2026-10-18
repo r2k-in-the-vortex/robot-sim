@@ -2,6 +2,7 @@
 
 use crate::FRAME_COUNT;
 use crate::dh::DHParameters;
+use crate::limits::MotionLimits;
 use crate::mesh::MESH_COUNT;
 use crate::mesh::MeshSettings;
 
@@ -35,6 +36,9 @@ pub struct Document {
     pub parameters: DHParameters,
     /// One mesh setting per frame, base first.
     pub meshes: [MeshSettings; MESH_COUNT],
+    /// The physical velocity, acceleration and jerk ceilings of each joint. A motion
+    /// command's own limits are capped by these; see [`crate::limits`].
+    pub motion_limits: MotionLimits,
 }
 
 impl Default for Document {
@@ -46,6 +50,7 @@ impl Default for Document {
             show_joint_labels: true,
             parameters: DHParameters::shipped(),
             meshes: core::array::from_fn(|_| MeshSettings::default()),
+            motion_limits: MotionLimits::default(),
         }
     }
 }
@@ -84,5 +89,10 @@ mod tests {
     #[test]
     fn the_default_dh_table_is_the_shipped_one() {
         assert_eq!(Document::shipped().parameters, DHParameters::shipped());
+    }
+
+    #[test]
+    fn the_default_motion_limits_are_valid() {
+        assert!(Document::shipped().motion_limits.is_positive_finite());
     }
 }

@@ -11,6 +11,17 @@ repository.workspace = true
 robot-model.workspace = true
 # `std` provides the `Scalar` impl for `f64`; the workspace dependency disables defaults.
 robot-kinematics = { workspace = true, features = ["std"] }
+# The Motion tab's planner; `std` supplies sqrt/cbrt through the platform maths.
+robot-motion = { workspace = true, features = ["std"] }
+
+# The Motion tab's command and queue JSON, which is the app's own schema rather than
+# `robot-model`'s configuration document.
+serde.workspace = true
+serde_json.workspace = true
+
+# `egui_plot` 0.37 is the release that pairs with egui 0.36, the version bevy_egui 0.43.1
+# pins; the lock file already resolves both crates against the same egui 0.36.2.
+egui_plot = "=0.37.0"
 
 # Pinned to an exact version, not a caret range: Bevy 0.20 shipped 2026-10-08 and its
 # satellite crates (bevy_camera, bevy_shape, bevy_extract) are new in this release, so a

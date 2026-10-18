@@ -152,5 +152,37 @@
       ],
       "opacity": 1.0
     }
+  ],
+  "motion_limits": [
+    {
+      "velocity_deg_s": 90.0,
+      "acceleration_deg_s2": 180.0,
+      "jerk_deg_s3": 360.0
+    },
+    {
+      "velocity_deg_s": 90.0,
+      "acceleration_deg_s2": 180.0,
+      "jerk_deg_s3": 360.0
+    },
+    {
+      "velocity_deg_s": 90.0,
+      "acceleration_deg_s2": 180.0,
+      "jerk_deg_s3": 360.0
+    },
+    {
+      "velocity_deg_s": 90.0,
+      "acceleration_deg_s2": 180.0,
+      "jerk_deg_s3": 360.0
+    },
+    {
+      "velocity_deg_s": 90.0,
+      "acceleration_deg_s2": 180.0,
+      "jerk_deg_s3": 360.0
+    },
+    {
+      "velocity_deg_s": 90.0,
+      "acceleration_deg_s2": 180.0,
+      "jerk_deg_s3": 360.0
+    }
   ]
 }

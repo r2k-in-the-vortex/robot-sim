@@ -5539,9 +5539,13 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_egui",
+ "egui_plot",
  "rfd",
  "robot-kinematics",
  "robot-model",
+ "robot-motion",
+ "serde",
+ "serde_json",
  "stl_io",
 ]
 

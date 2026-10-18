@@ -20,12 +20,17 @@
 
 pub mod dh;
 pub mod document;
+pub mod limits;
 pub mod mesh;
 pub mod persist;
 pub mod table;
 
 pub use dh::{DHParameters, DhRow};
 pub use document::{Document, SCHEMA_VERSION};
+pub use limits::{
+    DEFAULT_ACCELERATION_DEG_S2, DEFAULT_JERK_DEG_S3, DEFAULT_VELOCITY_DEG_S, JointMotionLimits,
+    MotionLimits,
+};
 pub use mesh::{MESH_COUNT, MeshSettings};
 pub use persist::{DocumentError, FILE_NAME, LoadError, load, parse, save, to_json};
 pub use robot_kinematics::{FRAME_COUNT, JOINT_COUNT};

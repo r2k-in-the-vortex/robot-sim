@@ -8,10 +8,17 @@
 //! `plan_movej_scalar` is the standard joint-space-line mode: one scalar S-curve in
 //! `s ∈ [0,1]`, with `q_i(t) = q0_i + s(t) Δq_i` and effective limits derived from the
 //! per-joint limits divided by `|Δq_i|`.
+//!
+//! `plan_movej_scalar_optimal` is the same composition with the time-optimal scalar
+//! profile ([`crate::plan::plan_rest_to_rest`]) instead of the conservative template. The
+//! app uses it for interactive playback: the conservative template's minimum duration is
+//! `4 · min(1, A/J, V/J)`, which is about four seconds for *any* non-zero move, and a
+//! bridge between two nearly identical poses would look like a stall.
 
 use crate::conservative::plan_rest_conservative;
 use crate::error::{PlanError, ProfileError};
-use crate::profile::{JointProfile, Limits, PlanKind, Profile, Segment, State};
+use crate::plan::plan_rest_to_rest;
+use crate::profile::{JointProfile, Limits, MAX_PHASES, PlanKind, Profile, Segment, State};
 use robot_kinematics::Field;
 
 /// Stretch the joint profiles to a common duration.
@@ -63,8 +70,49 @@ pub fn plan_movej_scalar<const N: usize, S: Field>(
     limits: [Limits<S>; N],
 ) -> Result<JointProfile<N, S>, PlanError> {
     let zero = S::zero();
-    let one = S::one();
+    let Some((delta, scalar_limits)) = effective_scalar_limits(start, target, limits)? else {
+        let joints = core::array::from_fn(|i| Profile::constant(State::new(start[i], zero, zero)));
+        return Ok(JointProfile::new(joints, zero));
+    };
+    let scalar = plan_rest_conservative(zero, S::one(), scalar_limits)?;
+    scale_scalar_profile(start, delta, &scalar, PlanKind::Conservative)
+}
 
+/// The time-optimal joint-space-line MoveJ.
+///
+/// Same path and synchronization as [`plan_movej_scalar`], with the scalar profile coming
+/// from [`plan_rest_to_rest`] rather than the conservative template. `f64`-only because
+/// that planner needs `sqrt`/`cbrt`.
+pub fn plan_movej_scalar_optimal<const N: usize>(
+    start: [f64; N],
+    target: [f64; N],
+    limits: [Limits<f64>; N],
+) -> Result<JointProfile<N, f64>, PlanError> {
+    let zero = 0.0;
+    let Some((delta, scalar_limits)) = effective_scalar_limits(start, target, limits)? else {
+        let joints = core::array::from_fn(|i| Profile::constant(State::new(start[i], zero, zero)));
+        return Ok(JointProfile::new(joints, zero));
+    };
+    let scalar = plan_rest_to_rest(0.0, 1.0, scalar_limits)?;
+    let kind = scalar.kind();
+    scale_scalar_profile(start, delta, &scalar, kind)
+}
+
+/// The per-joint deltas and the scalar limits the slowest joint allows.
+type ScalarPlan<const N: usize, S> = ([S; N], Limits<S>);
+
+/// The per-joint deltas and the scalar limits after dividing by them, or `None` when
+/// every joint is stationary.
+///
+/// A moving joint limits the scalar progress rate to `vmax_i / |Δq_i|` (and likewise for
+/// acceleration and jerk); the slowest joint is the smallest ratio. Joints that do not
+/// move do not constrain the path and are skipped.
+fn effective_scalar_limits<const N: usize, S: Field>(
+    start: [S; N],
+    target: [S; N],
+    limits: [Limits<S>; N],
+) -> Result<Option<ScalarPlan<N, S>>, PlanError> {
+    let zero = S::zero();
     let mut delta = [zero; N];
     for i in 0..N {
         if !start[i].is_finite() || !target[i].is_finite() {
@@ -110,8 +158,7 @@ pub fn plan_movej_scalar<const N: usize, S: Field>(
     }
 
     if !any_moving {
-        let joints = core::array::from_fn(|i| Profile::constant(State::new(start[i], zero, zero)));
-        return Ok(JointProfile::new(joints, zero));
+        return Ok(None);
     }
 
     let scalar_limits = Limits::new(
@@ -119,9 +166,22 @@ pub fn plan_movej_scalar<const N: usize, S: Field>(
         as_.ok_or(PlanError::NumericalFailure)?,
         js.ok_or(PlanError::NumericalFailure)?,
     )?;
-    let scalar = plan_rest_conservative(zero, one, scalar_limits)?;
-    let scalar_time = scalar.total_time();
+    Ok(Some((delta, scalar_limits)))
+}
 
+/// Scale one scalar profile in `s ∈ [0,1]` into a profile per joint.
+///
+/// The scalar jerk is multiplied by `Δq_i`; a joint that does not move is held at its
+/// start for the common duration rather than given an empty profile, because
+/// [`JointProfile`] promises one duration for every joint.
+fn scale_scalar_profile<const N: usize, S: Field>(
+    start: [S; N],
+    delta: [S; N],
+    scalar: &Profile<S>,
+    kind: PlanKind,
+) -> Result<JointProfile<N, S>, PlanError> {
+    let zero = S::zero();
+    let scalar_time = scalar.total_time();
     let mut joints = [Profile::constant(State::new(zero, zero, zero)); N];
     for i in 0..N {
         if delta[i] == zero {
@@ -131,7 +191,7 @@ pub fn plan_movej_scalar<const N: usize, S: Field>(
         let mut segments = [Segment {
             dur: zero,
             jerk: zero,
-        }; crate::profile::MAX_PHASES];
+        }; MAX_PHASES];
         let scalar_segments = scalar.segments();
         for (k, seg) in scalar_segments.iter().enumerate() {
             segments[k] = Segment {
@@ -139,15 +199,13 @@ pub fn plan_movej_scalar<const N: usize, S: Field>(
                 jerk: seg.jerk * delta[i],
             };
         }
-        let profile = Profile::from_parts_with_kind(
+        joints[i] = Profile::from_parts_with_kind(
             State::new(start[i], zero, zero),
             &segments[..scalar_segments.len()],
-            PlanKind::Conservative,
+            kind,
         )
         .map_err(map_profile_error)?;
-        joints[i] = profile;
     }
-
     Ok(JointProfile::new(joints, scalar_time))
 }
 

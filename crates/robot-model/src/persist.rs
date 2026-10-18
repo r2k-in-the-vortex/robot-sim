@@ -35,6 +35,7 @@ use serde_json::value::RawValue;
 
 use crate::dh::{DHParameters, DhRow};
 use crate::document::{Document, SCHEMA_VERSION, units};
+use crate::limits::{JointMotionLimits, MotionLimits};
 use crate::mesh::MeshSettings;
 use crate::{FRAME_COUNT, JOINT_COUNT};
 
@@ -60,11 +61,16 @@ const BAD_MESH_OFFSET: &str = "Each mesh offset must contain exactly three value
 const BAD_MESH_ROTATION: &str = "Each mesh rotation must contain exactly three values.";
 const BAD_MESH_VALUE: &str = "Mesh offsets, rotations, and opacity must be finite numbers.";
 const BAD_MESH_OPACITY: &str = "Mesh opacity must be from 0 to 1.";
+const BAD_MOTION_LIMITS: &str =
+    "Parameter file motion_limits must contain six joint limit objects.";
+const BAD_MOTION_LIMIT_VALUE: &str = "Motion limits must all be finite positive numbers.";
 
 /// The `joints` key's own name in the two places a joint can go wrong.
 const JOINT_SCOPE: &str = "joint";
 /// The `meshes` key's own name, likewise.
 const MESH_SCOPE: &str = "mesh";
+/// The `motion_limits` key's row name.
+const MOTION_LIMIT_SCOPE: &str = "motion limit";
 
 /// Why a configuration file could not be read or written.
 ///
@@ -262,6 +268,30 @@ pub fn parse(text: &str, config_dir: &Path) -> Result<Document, DocumentError> {
         }
     };
 
+    // `motion_limits` is newer than the rest of the file, so a missing key or an explicit
+    // `null` means the defaults; a file that carries it must carry all six rows. The
+    // finiteness/positivity check comes after every row has been read, matching the DH
+    // and mesh sections' order.
+    let motion_limits = match file.get("motion_limits") {
+        None => MotionLimits::default(),
+        Some(raw) if is_null(raw) => MotionLimits::default(),
+        Some(raw) => {
+            let entries = array(raw).ok_or(DocumentError::Invalid(BAD_MOTION_LIMITS))?;
+            if entries.len() != JOINT_COUNT {
+                return Err(DocumentError::Invalid(BAD_MOTION_LIMITS));
+            }
+            let mut joints = [JointMotionLimits::default(); JOINT_COUNT];
+            for (index, entry) in entries.iter().enumerate() {
+                joints[index] = motion_limit_row(entry, index)?;
+            }
+            let limits = MotionLimits::new(joints);
+            if !limits.is_positive_finite() {
+                return Err(DocumentError::Invalid(BAD_MOTION_LIMIT_VALUE));
+            }
+            limits
+        }
+    };
+
     Ok(Document {
         schema_version: SCHEMA_VERSION,
         show_mesh_edges,
@@ -269,6 +299,7 @@ pub fn parse(text: &str, config_dir: &Path) -> Result<Document, DocumentError> {
         show_joint_labels,
         parameters: DHParameters::new(rows),
         meshes,
+        motion_limits,
     })
 }
 
@@ -307,6 +338,10 @@ pub fn to_json(document: &Document, config_dir: &Path) -> Result<String, Documen
         });
     }
 
+    if !document.motion_limits.is_positive_finite() {
+        return Err(DocumentError::Invalid(BAD_MOTION_LIMIT_VALUE));
+    }
+
     let file = FileRoot {
         schema_version: document.schema_version,
         units: FileUnits {
@@ -323,6 +358,11 @@ pub fn to_json(document: &Document, config_dir: &Path) -> Result<String, Documen
             alpha_deg: row.alpha_deg,
         }),
         meshes,
+        motion_limits: document.motion_limits.joints.map(|joint| FileJointLimits {
+            velocity_deg_s: joint.velocity_deg_s,
+            acceleration_deg_s2: joint.acceleration_deg_s2,
+            jerk_deg_s3: joint.jerk_deg_s3,
+        }),
     };
     let mut text = serde_json::to_string_pretty(&file).map_err(DocumentError::Json)?;
     text.push('\n');
@@ -371,6 +411,7 @@ struct FileRoot {
     show_joint_labels: bool,
     joints: [FileJoint; JOINT_COUNT],
     meshes: Vec<FileMesh>,
+    motion_limits: [FileJointLimits; JOINT_COUNT],
 }
 
 /// The `units` block, which is documentation rather than data: the reader checks only
@@ -398,6 +439,14 @@ struct FileMesh {
     offset: [f64; 3],
     rotation_deg: [f64; 3],
     opacity: f64,
+}
+
+/// One joint's physical motion limits as the file spells them.
+#[derive(Serialize)]
+struct FileJointLimits {
+    velocity_deg_s: f64,
+    acceleration_deg_s2: f64,
+    jerk_deg_s3: f64,
 }
 
 /// One row of the `joints` array (`simulator.py:747-755`).
@@ -526,6 +575,29 @@ fn mesh_vector(
         })?;
     }
     Ok(vector)
+}
+
+/// One row of the `motion_limits` array.
+fn motion_limit_row(raw: &RawValue, index: usize) -> Result<JointMotionLimits, DocumentError> {
+    let Some(limit) = object(raw) else {
+        return Err(DocumentError::Invalid(BAD_MOTION_LIMITS));
+    };
+    let value = |key: &'static str| -> Result<f64, DocumentError> {
+        limit
+            .get(key)
+            .copied()
+            .and_then(number)
+            .ok_or(DocumentError::Field {
+                scope: MOTION_LIMIT_SCOPE,
+                index: index + 1,
+                name: Some(key),
+            })
+    };
+    Ok(JointMotionLimits::new(
+        value("velocity_deg_s")?,
+        value("acceleration_deg_s2")?,
+        value("jerk_deg_s3")?,
+    ))
 }
 
 /// Where a mesh path in the file points, as an absolute path.
@@ -800,6 +872,11 @@ mod tests {
             DHParameters::shipped(),
             "the shipped table"
         );
+        assert_eq!(
+            document.motion_limits,
+            MotionLimits::default(),
+            "the shipped motion limits"
+        );
         let written = to_json(&document, &root).expect("the shipped document serializes");
         assert_eq!(written, shipped, "byte for byte");
     }
@@ -933,6 +1010,65 @@ mod tests {
                 .iter()
                 .all(|mesh| *mesh == MeshSettings::default())
         );
+    }
+
+    #[test]
+    fn a_missing_motion_limits_section_means_the_defaults() {
+        let document = parse(&text(6), &repo_root()).expect("parse");
+        assert_eq!(document.motion_limits, MotionLimits::default());
+        // An explicit null is the same as leaving the key out, like `meshes`.
+        let null = parse(&with_field(r#""motion_limits": null"#), &repo_root()).expect("parse");
+        assert_eq!(null.motion_limits, MotionLimits::default());
+    }
+
+    #[test]
+    fn motion_limits_round_trip() {
+        let mut document = parse(&shipped_text(), &repo_root()).expect("parse");
+        document.motion_limits.joints[0] = JointMotionLimits::new(12.5, 34.0, 56.0);
+        document.motion_limits.joints[5] = JointMotionLimits::new(1.0, 2.0, 3.0);
+        let written = to_json(&document, &repo_root()).expect("serialize");
+        let reloaded = parse(&written, &repo_root()).expect("parse");
+        assert_eq!(reloaded.motion_limits, document.motion_limits);
+        assert!(written.contains("\"velocity_deg_s\": 12.5"), "{written}");
+    }
+
+    #[test]
+    fn a_broken_motion_limits_section_is_reported() {
+        const ROW: &str =
+            r#"{"velocity_deg_s": 90.0, "acceleration_deg_s2": 180.0, "jerk_deg_s3": 360.0}"#;
+        let section = |entries: &[String]| {
+            with_field(&format!("\"motion_limits\": [{}]", entries.join(", ")))
+        };
+
+        // The wrong number of rows, and a value that is not a list at all.
+        expect_message(&section(&vec![String::from(ROW); 5]), BAD_MOTION_LIMITS);
+        expect_message(&with_field(r#""motion_limits": "fast""#), BAD_MOTION_LIMITS);
+
+        // A row that is not an object.
+        let mut entries = vec![String::from(ROW); 6];
+        entries[2] = String::from("7");
+        expect_message(&section(&entries), BAD_MOTION_LIMITS);
+
+        // A missing key is named by row, like the DH values.
+        let broken = ROW.replace(", \"jerk_deg_s3\": 360.0", "");
+        let mut entries = vec![String::from(ROW); 6];
+        entries[4] = broken;
+        match parse(&section(&entries), &repo_root()) {
+            Err(error) => assert_eq!(
+                error.to_string(),
+                "motion limit 5: 'jerk_deg_s3' is missing or not a number."
+            ),
+            Ok(_) => panic!("jerk is required"),
+        }
+
+        // Zero, negative and overflowed limits are refused, not clamped by the loader.
+        for value in ["0.0", "-1.0", "1e400"] {
+            let mut entries = vec![String::from(ROW); 6];
+            entries[1] = format!(
+                r#"{{"velocity_deg_s": {value}, "acceleration_deg_s2": 180.0, "jerk_deg_s3": 360.0}}"#
+            );
+            expect_message(&section(&entries), BAD_MOTION_LIMIT_VALUE);
+        }
     }
 
     #[test]
