@@ -12,8 +12,8 @@ use robot_model::{DHParameters, FRAME_COUNT, MotionLimits};
 
 use crate::RobotState;
 use crate::motion::{
-    CommandLimits, MotionCommand, MotionRuntime, PlanSource, PlaybackPlan, command_from_json,
-    command_to_json, queue_to_json,
+    CommandLimits, CommandPose, EditorMode, MotionCommand, MotionRuntime, PlanSource, PlaybackPlan,
+    command_from_json, command_to_json, queue_to_json,
 };
 use crate::session;
 
@@ -56,7 +56,8 @@ pub fn controls(ui: &mut egui::Ui, motion: &mut MotionRuntime, robot: &RobotStat
     ui.label(
         RichText::new(
             "MoveJ: one joint-space S-curve, so every joint starts and stops together \
-             and the slowest one sets the pace.",
+             and the slowest one sets the pace. MoveL: a Cartesian straight line, sampled \
+             and solved with the closed-form IK.",
         )
         .small(),
     );
@@ -158,45 +159,47 @@ fn editor_section(
     physical: &MotionLimits,
     current: [f64; JOINT_COUNT],
 ) {
-    egui::CollapsingHeader::new("Joint move (MoveJ)")
+    egui::CollapsingHeader::new("Command")
         .default_open(true)
         .show(ui, |ui| {
-            ui.label(RichText::new("Start (deg)").small());
-            joint_fields(ui, "motion_start", &mut motion.editor.start_deg);
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(!motion.active, egui::Button::new("From current"))
-                    .on_hover_text("Fill the start from the arm's current joint angles")
-                    .clicked()
-                {
-                    motion.fill_start_from_current(current);
-                }
-                if ui
-                    .add_enabled(
-                        !motion.active && !motion.commands.is_empty(),
-                        egui::Button::new("From last queued"),
-                    )
-                    .on_hover_text("Fill the start from the last queued move's stop")
-                    .clicked()
-                    && let Err(error) = motion.fill_start_from_last()
-                {
-                    motion.status = error;
-                    motion.status_is_error = true;
-                }
+            let mut mode = motion.editor.mode;
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut mode, EditorMode::MoveJ, "MoveJ");
+                ui.selectable_value(&mut mode, EditorMode::Lin, "MoveL");
             });
+            if mode != motion.editor.mode {
+                motion.switch_mode(mode, parameters, current);
+            }
 
-            ui.add_space(4.0);
-            ui.label(RichText::new("Stop (deg)").small());
-            joint_fields(ui, "motion_stop", &mut motion.editor.stop_deg);
+            match motion.editor.mode {
+                EditorMode::MoveJ => {
+                    ui.label(RichText::new("Start (deg)").small());
+                    joint_fields(ui, "motion_start", &mut motion.editor.start_deg);
+                    start_buttons(ui, motion, parameters, current);
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Stop (deg)").small());
+                    joint_fields(ui, "motion_stop", &mut motion.editor.stop_deg);
+                    stop_buttons(ui, motion, parameters, current);
+                }
+                EditorMode::Lin => {
+                    ui.label(RichText::new("Start pose (X/Y/Z, ZYX RPY deg)").small());
+                    pose_fields(ui, "motion_start_pose", &mut motion.editor.start_pose);
+                    start_buttons(ui, motion, parameters, current);
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Stop pose (X/Y/Z, ZYX RPY deg)").small());
+                    pose_fields(ui, "motion_stop_pose", &mut motion.editor.stop_pose);
+                    stop_buttons(ui, motion, parameters, current);
+                }
+            }
+
             ui.add_space(4.0);
             limit_fields(ui, &mut motion.editor.limits);
 
-            let draft = motion.editor.command();
-            let draft_plan = draft.plan(physical);
-            match &draft_plan {
-                Ok(profile) => {
+            let draft = motion.draft_duration(parameters, physical, current);
+            match &draft {
+                Ok(duration) => {
                     ui.label(
-                        RichText::new(format!("Duration: {:.2} s", profile.total_time()))
+                        RichText::new(format!("Duration: {duration:.2} s"))
                             .monospace()
                             .small(),
                     );
@@ -219,7 +222,7 @@ fn editor_section(
             ui.add_space(4.0);
             if ui
                 .add_enabled(
-                    !motion.active && draft_plan.is_ok(),
+                    !motion.active && draft.is_ok(),
                     egui::Button::new("Add to queue"),
                 )
                 .clicked()
@@ -228,6 +231,103 @@ fn editor_section(
                 motion.status = error;
                 motion.status_is_error = true;
             }
+        });
+}
+
+/// The two start-pose buttons, shared by both modes so the wording and the error handling
+/// cannot drift.
+fn start_buttons(
+    ui: &mut egui::Ui,
+    motion: &mut MotionRuntime,
+    parameters: &DHParameters,
+    current: [f64; JOINT_COUNT],
+) {
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(!motion.active, egui::Button::new("From current"))
+            .on_hover_text("Fill the start from the arm's current pose")
+            .clicked()
+            && let Err(error) = motion.fill_start_from_current(parameters, current)
+        {
+            motion.status = error;
+            motion.status_is_error = true;
+        }
+        if ui
+            .add_enabled(
+                !motion.active && !motion.commands.is_empty(),
+                egui::Button::new("From last queued"),
+            )
+            .on_hover_text("Fill the start from the last queued command's stop")
+            .clicked()
+            && let Err(error) = motion.fill_start_from_last(parameters, current)
+        {
+            motion.status = error;
+            motion.status_is_error = true;
+        }
+    });
+}
+
+/// The stop buttons: the current pose, or a copy of the start.
+fn stop_buttons(
+    ui: &mut egui::Ui,
+    motion: &mut MotionRuntime,
+    parameters: &DHParameters,
+    current: [f64; JOINT_COUNT],
+) {
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(!motion.active, egui::Button::new("From current"))
+            .on_hover_text("Fill the stop from the arm's current pose")
+            .clicked()
+            && let Err(error) = motion.fill_stop_from_current(parameters, current)
+        {
+            motion.status = error;
+            motion.status_is_error = true;
+        }
+        if ui
+            .add_enabled(!motion.active, egui::Button::new("Copy start"))
+            .on_hover_text("Use the start as the stop (a zero-motion command)")
+            .clicked()
+        {
+            motion.editor.stop_deg = motion.editor.start_deg;
+            motion.editor.stop_pose = motion.editor.start_pose;
+        }
+    });
+}
+
+fn pose_fields(ui: &mut egui::Ui, id: &str, pose: &mut CommandPose) {
+    egui::Grid::new(format!("{id}_position"))
+        .num_columns(3)
+        .spacing([6.0, 2.0])
+        .show(ui, |ui| {
+            for label in ["X", "Y", "Z"] {
+                ui.label(RichText::new(label).small());
+            }
+            ui.end_row();
+            for value in &mut pose.position {
+                ui.add_sized(
+                    [54.0, 18.0],
+                    egui::DragValue::new(value).speed(0.5).max_decimals(3),
+                );
+            }
+            ui.end_row();
+        });
+    ui.add_space(2.0);
+    egui::Grid::new(format!("{id}_orientation"))
+        .num_columns(3)
+        .spacing([6.0, 2.0])
+        .show(ui, |ui| {
+            for label in ["Roll°", "Pitch°", "Yaw°"] {
+                ui.label(RichText::new(label).small());
+            }
+            ui.end_row();
+            for value in &mut pose.rpy_deg {
+                ui.add_sized(
+                    [54.0, 18.0],
+                    egui::DragValue::new(value).speed(0.5).max_decimals(3),
+                );
+            }
+            ui.end_row();
         });
 }
 
@@ -409,16 +509,28 @@ fn queue_section(
     }
 
     // Removal is collected and applied after the loop: the list cannot be mutated while it
-    // is being iterated.
+    // is being iterated. The durations come from the preview plan, never from replanning:
+    // a `lin` command costs a full IK certification.
+    let durations: Vec<Option<f64>> = (0..motion.commands.len())
+        .map(|index| {
+            motion
+                .plan
+                .as_ref()
+                .and_then(|plan| plan.command_duration(index))
+        })
+        .collect();
+    let planned = motion.plan.is_some();
     let mut remove = None;
     for (index, command) in motion.commands.iter().enumerate() {
         ui.horizontal(|ui| {
-            let duration = command.plan(physical).map(|profile| profile.total_time());
-            let text = match duration {
-                Ok(duration) => {
+            let text = match durations[index] {
+                Some(duration) => {
                     format!("#{} {}  {:.2} s", index + 1, command.kind_name(), duration)
                 }
-                Err(_) => format!("#{} {}  invalid", index + 1, command.kind_name()),
+                None if planned => {
+                    format!("#{} {}  0.00 s", index + 1, command.kind_name())
+                }
+                None => format!("#{} {}  invalid", index + 1, command.kind_name()),
             };
             ui.label(RichText::new(text).small());
             if ui
@@ -428,15 +540,23 @@ fn queue_section(
                 remove = Some(index);
             }
         });
-        ui.label(
-            RichText::new(format!(
+        let details = match command {
+            MotionCommand::MoveJ(command) => format!(
                 "  S {}   E {}",
-                vector_text(command.start_deg()),
-                vector_text(command.stop_deg())
-            ))
-            .monospace()
-            .small()
-            .color(ui.visuals().weak_text_color()),
+                vector_text(command.start_deg),
+                vector_text(command.stop_deg)
+            ),
+            MotionCommand::Lin(command) => format!(
+                "  S {}   E {}",
+                pose_text(command.start),
+                pose_text(command.stop)
+            ),
+        };
+        ui.label(
+            RichText::new(details)
+                .monospace()
+                .small()
+                .color(ui.visuals().weak_text_color()),
         );
     }
     if let Some(index) = remove {
@@ -558,10 +678,21 @@ fn json_section(
                 .clicked()
             {
                 match command_from_json(&motion.command_import) {
-                    Ok(MotionCommand::MoveJ(command)) => {
-                        motion.editor.start_deg = command.start_deg;
-                        motion.editor.stop_deg = command.stop_deg;
-                        motion.editor.limits = command.limits;
+                    Ok(command) => {
+                        match command {
+                            MotionCommand::MoveJ(command) => {
+                                motion.editor.mode = EditorMode::MoveJ;
+                                motion.editor.start_deg = command.start_deg;
+                                motion.editor.stop_deg = command.stop_deg;
+                                motion.editor.limits = command.limits;
+                            }
+                            MotionCommand::Lin(command) => {
+                                motion.editor.mode = EditorMode::Lin;
+                                motion.editor.start_pose = command.start;
+                                motion.editor.stop_pose = command.stop;
+                                motion.editor.limits = command.limits;
+                            }
+                        }
                         motion.command_import.clear();
                         motion.status = String::from("Loaded the command into the editor.");
                         motion.status_is_error = false;
@@ -627,6 +758,18 @@ fn vector_text(values: [f64; JOINT_COUNT]) -> String {
         .map(|value| format!("{value:.1}"))
         .collect::<Vec<String>>()
         .join(" ")
+}
+
+fn pose_text(pose: CommandPose) -> String {
+    format!(
+        "P ({:.1}, {:.1}, {:.1})  RPY ({:.1}, {:.1}, {:.1})",
+        pose.position[0],
+        pose.position[1],
+        pose.position[2],
+        pose.rpy_deg[0],
+        pose.rpy_deg[1],
+        pose.rpy_deg[2]
+    )
 }
 
 /// The bottom panel: the whole planned trajectory plus the playback cursor.

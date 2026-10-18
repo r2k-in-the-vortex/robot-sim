@@ -70,7 +70,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::Resource;
-use robot_kinematics::{Geometry, GeometryError, JOINT_COUNT, Pose, fk, units};
+use robot_kinematics::{Geometry, GeometryError, JOINT_COUNT, Mat3, Pose, fk, units};
 use robot_model::table::TableError;
 use robot_model::{
     DHParameters, DhRow, Document, JointMotionLimits, MESH_COUNT, MeshSettings, MotionLimits,
@@ -988,6 +988,18 @@ pub fn rotation_to_rpy_degrees(pose: &Pose<f64>) -> [f64; 3] {
         (0.0, (-pose.r.at(0, 1)).atan2(pose.r.at(1, 1)))
     };
     [roll.to_degrees(), pitch.to_degrees(), yaw.to_degrees()]
+}
+
+/// The inverse of [`rotation_to_rpy_degrees`]: `R = Rz(yaw) · Ry(pitch) · Rx(roll)`.
+///
+/// The extraction has a two-branch structure at pitch ±90°, so the round trip is exact for
+/// ordinary angles and only up to the gimbal-lock representative at the singular one. The
+/// Motion tab's `lin` editor takes RPY because it is what the pose readout shows; the
+/// planner itself only ever sees the matrix this builds.
+pub fn rotation_from_rpy_degrees(roll_deg: f64, pitch_deg: f64, yaw_deg: f64) -> Mat3<f64> {
+    Mat3::rot_z(yaw_deg.to_radians())
+        * Mat3::rot_y(pitch_deg.to_radians())
+        * Mat3::rot_x(roll_deg.to_radians())
 }
 
 /// The geometry a table describes, or the reference's sentence for why it has none.
@@ -2171,6 +2183,35 @@ mod tests {
         assert!(roll.abs() < 1e-9, "roll {roll}");
         assert!((pitch - 90.0).abs() < 1e-9, "pitch {pitch}");
         assert!((yaw + 15.0).abs() < 1e-9, "yaw {yaw}");
+    }
+
+    #[test]
+    fn the_rpy_inverse_rebuilds_the_rotation() {
+        // `rotation_from_rpy_degrees` is the inverse the `lin` command editor needs:
+        // `Rz(yaw)·Ry(pitch)·Rx(roll)`, exactly the composition the extraction assumes.
+        for (roll, pitch, yaw) in [
+            (0.0, 0.0, 0.0),
+            (10.0, 20.0, 30.0),
+            (-45.0, 15.5, 170.0),
+            (80.0, -30.0, -120.0),
+            (-179.0, 60.0, -179.0),
+        ] {
+            let rebuilt = rotation_from_rpy_degrees(roll, pitch, yaw);
+            let [actual_roll, actual_pitch, actual_yaw] =
+                rotation_to_rpy_degrees(&Pose::new(rebuilt, robot_kinematics::Vec3::zero()));
+            assert!(
+                (actual_roll - roll).abs() < 1e-9,
+                "roll {actual_roll} for {roll}"
+            );
+            assert!(
+                (actual_pitch - pitch).abs() < 1e-9,
+                "pitch {actual_pitch} for {pitch}"
+            );
+            assert!(
+                (actual_yaw - yaw).abs() < 1e-9,
+                "yaw {actual_yaw} for {yaw}"
+            );
+        }
     }
 
     #[test]

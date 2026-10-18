@@ -235,7 +235,7 @@ the exact goldens compare with `==`.
 | `Motion.synchronize` | `synchronize` | `golden_motion.rs` sync cases (exact `Ratio`) |
 | `Motion.movejScalar` | `plan_movej_scalar` | `tests/sync.rs` |
 | — (the same composition with the M1-opt scalar profile; app-facing) | `plan_movej_scalar_optimal` | `tests/sync.rs` |
-| `Motion.IsRotation`, `Motion.LinearPath`, `Motion.LinCommand`, `Motion.SampledTrajectory`, `Motion.SampledSolutions`, `Motion.LinPlan`, `Motion.HasLinPlan` | — (no Rust `lin` mode yet) | — (definitions only; no theorem) |
+| `Motion.IsRotation`, `Motion.LinearPath`, `Motion.LinCommand`, `Motion.SampledTrajectory`, `Motion.SampledSolutions`, `Motion.LinPlan`, `Motion.HasLinPlan` | `robot_motion::linear::{LinearPath, LinearSample, SampledTrajectory, solve_sample, certify_linear_path, sample_linear_certificate}`; the app's `lin` command in `robot-app/src/motion_linear.rs` | `linear.rs` unit tests; the app's `lin` command tests |
 | `Motion.stall_error_grows` / `stall_error_crosses` | supervisor plant test | `tests/supervisor.rs` (the Rust side is a simulation; only the kinematic growth is a theorem) |
 
 ### Theorem map
@@ -299,8 +299,21 @@ sampled path-derivative bounds and `cartesian_path_feasible` are not implemented
 `Motion.Linear` is the §5.6 `lin` vocabulary, not the M5 certifier. It defines
 `IsRotation`, `LinearPath`, `LinCommand`, `SampledTrajectory`, `SampledSolutions`,
 `SamplesAreSolutions`, `SamplesOnPath`, `BranchContinuous`, `WithinSampledLimits`,
-`LinPlan` and the existential definition `HasLinPlan`. The module has no theorem and no
-Rust counterpart: it states what a sampled plan must satisfy, not that one exists.
+`LinPlan` and the existential definition `HasLinPlan`. The module has no theorem: it
+states what a sampled plan must satisfy, not that one exists.
+
+The Rust counterpart is `robot_motion::linear`. `LinearPath` supplies slerp as the
+`rotation` function (the Lean structure's supplied-data slot), `LinearSample` carries the
+placed total angles and shoulder/elbow labels, `SampledTrajectory` is the uniform sampled
+view with the same `k/(count-1)` parameter law and forward finite differences,
+`solve_sample` is the numerical `SamplesAreSolutions`/`SamplesOnPath` step, and
+`check_branch_continuous` / `check_within_sampled_limits` are the two sampled predicates.
+The module additionally offers `certify_linear_path` + `sample_linear_certificate`, the
+application's rest-to-rest time law. Those two are a **numerical** extension: the M1/M2/M3
+path-derivative bounds are finite differences over a sample grid, not the hypotheses of
+`cartesian_path_feasible`, so the result is a sampled certificate rather than a proof.
+The app's `lin` command is the user-facing instantiation of that extension; the Lean module
+itself still proves nothing about it.
 
 **M1-opt (staged).** The Rust `plan_rest_to_rest` (Cases A/A′/B/C, with `sqrt`/`cbrt`)
 is implemented and golden-tested with the declared tolerance. The Lean proofs of the

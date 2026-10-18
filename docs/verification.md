@@ -235,10 +235,15 @@ The `lin` (Cartesian straight-line) mode has a Lean vocabulary but no Lean theor
 `Motion.Linear` defines `LinearPath`, `LinCommand`, `SampledTrajectory`,
 `SampledSolutions`, the four sampled checks (`SamplesAreSolutions`, `SamplesOnPath`,
 `BranchContinuous`, `WithinSampledLimits`) and `LinPlan`/`HasLinPlan`. `HasLinPlan` is a
-definition; nothing asserts it for a command. The feasibility decision is numerical and
-sampled — IK each sample, branch/winding step checks, finite-difference V/A/J bounds — and
-it bounds only the sampled sequence, not continuous time. M5's `cartesian_path_feasible`
-remains the separate conditional certificate and is not claimed here.
+definition; nothing asserts it for a command. The Rust counterpart is now implemented:
+`robot_motion::linear` carries the vocabulary and the checks, and `robot-app`'s
+`motion_linear` module adds the numerical time law. Certification samples the path,
+solves each pose with the closed-form IK, rejects a branch/winding step or an FK miss, and
+derives conservative scalar limits from finite-difference `M1/M2/M3` bounds; the resulting
+S-curve is re-sampled in time and checked again. The guarantee is over the sample grid and
+the S-curve's analytic inequalities, not continuous time, and the Lean module still proves
+nothing about it. M5's `cartesian_path_feasible` remains the separate conditional
+certificate and is not claimed here.
 
 What is deliberately not attempted: arm dynamics and torque limits (the repository has no
 mass matrix or torque model), true time-optimal path parameterization, position-limit

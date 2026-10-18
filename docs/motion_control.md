@@ -1291,9 +1291,10 @@ Deliberately staged or out of scope, with the gap named in `docs/lean-rust-map.m
   optimal planner, and `planRestConservative` is the verified default.
 - `stopFeasible_necessary` (the arbitrary-profile necessity direction of M2); the
   constructive contract and the exact `planGeneral_isSome_iff` are proved.
-- The M5 Cartesian certifier; `comp_bounds` is proved, the sampled path bounds are not.
-- The Rust `lin` mode and any Lean theorem about it. `Motion.Linear` is vocabulary only;
-  the numerical sampled check is future work, as is the M5 certifier.
+- The M5 Cartesian certifier theorem; `comp_bounds` is proved, the sampled path bounds are
+  not. `Motion.Linear` remains vocabulary only, but the Rust `lin` mode now exists: it
+  implements the sampled checks numerically (`robot-motion::linear` and the app's
+  `motion_linear` planner) without claiming `cartesian_path_feasible`.
 - Full supervisor stall soundness (including command saturation), which remains a
   simulation property in M4; only the kinematic error-growth lemma is a theorem.
 
@@ -1460,6 +1461,33 @@ pub fn plan_movej_scalar_optimal<const N: usize>(
     start: [f64; N], target: [f64; N], limits: [Limits<f64>; N],
 ) -> Result<JointProfile<N, f64>, PlanError>;
 ```
+
+The Cartesian layer is `robot_motion::linear` (§5.6):
+
+```rust
+pub struct LinearPath { /* start, stop, supplied rotation path */ }
+pub struct LinearSample { pub angles: [f64; 6], pub shoulder: i8, pub elbow: i8 }
+pub struct SampledTrajectory<'a> { /* dt, &[[f64; 6]], Lean parameter law */ }
+pub struct LinearCertificate { pub profile: Profile<f64>, pub start: LinearSample, /* … */ }
+
+pub fn solve_sample(geometry: &Geometry<f64>, target: &Pose<f64>,
+                    reference: &Solution<f64>) -> Result<LinearSample, LinearError>;
+pub fn certify_linear_path(geometry: &Geometry<f64>, path: &LinearPath,
+                           reference: &Solution<f64>,
+                           limits: &[Limits<f64>; 6], max_step: f64,
+                           samples: &mut [LinearSample])
+    -> Result<LinearCertificate, LinearError>;
+pub fn sample_linear_certificate(geometry: &Geometry<f64>, path: &LinearPath,
+                                 certificate: &LinearCertificate,
+                                 out: &mut [LinearSample]) -> Result<usize, LinearError>;
+```
+
+Angles are total DH radians; the app converts at its degree boundary. The routines fill
+caller-provided slices, so the module allocates nothing. `certify_linear_path` plus
+`sample_linear_certificate` are the numerical rest-to-rest extension described in §5.6;
+`LinearError` is a closed enum (`UnreachableSample`, `SamplesOnPath`,
+`BranchDiscontinuity`, `StepTooLarge`, `LimitExceeded`, `CertificationFailed`,
+`NumericalFailure`, and the input checks).
 
 `plan_movej_scalar_optimal` shares the effective-limit computation and the per-joint
 scaling with `plan_movej_scalar`; only the scalar profile constructor differs. The
@@ -1699,8 +1727,9 @@ The app's Motion tab (issue #13) implements the first command type, `movej`, on 
   `RobotState::runtime_angles_deg`; the 3D view and the Parameters-tab joint fields follow.
   The frame delta is capped at 0.1 s so a stall cannot teleport the arm.
 - The app boundary is degrees. Command start/stop and the command's V/A/J are in degrees
-  and seconds; the planner is unit-agnostic, so no conversion is needed. Runtime angles
-  stay continuous and unwrapped: nothing in the motion path calls `wrap_angle` or
+  and seconds; the MoveJ planner is unit-agnostic. MoveL converts the runtime degrees to
+  total DH radians for the IK and back through `theta_offset`, without wrapping. Runtime
+  angles stay continuous and unwrapped: nothing in the playback path calls `wrap_angle` or
   `nearest_representative`, and a 359° → 361° move is a 2° move.
 - `movej` is the scalar joint-space-line mode, timed with
   `plan_movej_scalar_optimal`. All joints follow `q_i(t) = q0_i + s(t) Δq_i` and finish
@@ -1716,29 +1745,50 @@ The app's Motion tab (issue #13) implements the first command type, `movej`, on 
   first command, or a gap after an edit or import. Transitions are **not** written back
   into the queue, so replaying from a different pose does not accumulate synthetic
   commands. Commands are rest-to-rest; the arm reaches zero velocity at each junction.
-- Command JSON is one `{"type":"movej", ...}` object; queue JSON is
-  `{"schema":"robot-app.motion-queue","version":1,"commands":[...]}`. Both are
+- Command JSON is one `{"type":"movej", ...}` or `{"type":"lin", ...}` object; queue JSON
+  is `{"schema":"robot-app.motion-queue","version":1,"commands":[...]}`. Both are
   copy-pasteable, and the importers are atomic: a queue that fails validation or planning
   leaves the old one in place.
 - The Motion tab keeps the 3D view in the central rect and puts the command editor and
   queue on the left, with joint-angle, tool-XYZ and unwrapped-RPY graphs in a bottom
   panel. The graphs show the whole plan and a cursor at the playback time.
 
-**Planned command types.** These are specified here but not implemented in Rust. They need
-a sampled-trajectory segment beside the analytic `JointProfile`s:
+**MoveL (`lin`), implemented.** The Motion tab's second command type is a Cartesian
+straight line, `{"type": "lin", "start": {…}, "stop": {…}, "limits": {…}}` with
+`CommandPose` spelled `{"position": [x, y, z], "rpy_deg": [roll, pitch, yaw]}` (model
+units and ZYX degrees). It is the `Motion.Linear` path with slerp as the supplied rotation
+function: affine position, spherical-linear orientation, so the tool follows the segment
+exactly at the sampled points. `robot-motion/src/linear.rs` contains the Lean vocabulary
+(`LinearPath`, `LinearSample`, `SampledTrajectory`, `solve_sample`,
+`check_branch_continuous`, `check_within_sampled_limits`); `robot-app/src/motion_linear.rs`
+supplies the timing and the app boundary:
 
-- `lin`: interpolate the tool pose linearly in position and with a rotation interpolation
-  (slerp or axis-angle) in Cartesian space, sample at a fixed rate, and solve each sample
-  with the existing closed-form IK. Reject a path with an unreachable sample or a branch
-  discontinuity. Joint limits are checked on the sampled joint trajectory. The Lean
-  formulation is `lean/Motion/Linear.lean` (definitions only): `IsRotation`, `LinearPath`
-  (affine position plus a supplied rotation path), `LinCommand`, `SampledTrajectory`,
-  `SampledSolutions`, and the checks `SamplesAreSolutions`, `SamplesOnPath`,
-  `BranchContinuous`, `WithinSampledLimits`, `LinPlan`, plus the existential definition
-  `HasLinPlan`. The module states no theorem: the feasibility decision is the numerical,
-  sampled check above, no plan is asserted to exist, and M5's `cartesian_path_feasible`
-  certifier remains future work. The slerp-vs-axis-angle choice stays supplied data,
-  matching this section.
+1. Sample the path uniformly in the parameter `s ∈ [0, 1]` and solve each pose with the
+   closed-form IK, choosing the candidate nearest the previous sample and placing it
+   beside the arm's own winding.
+2. Reject a sample with no candidate or one whose forward kinematics misses the pose, a
+   shoulder/elbow label change, or a joint step above 30° between samples.
+3. Estimate per-joint `M1/M2/M3` bounds for `q'(s)`, `q''(s)` and `q'''(s)` by finite
+   differences, then choose conservative scalar `(V, A, J)` by the M5 inequalities with
+   headroom. If no positive limits exist, the command is refused rather than silently
+   slowed or made infeasible.
+4. Plan `s(t)` as a rest-to-rest S-curve with `plan_rest_to_rest`.
+5. Resample `q(s(t))` uniformly in time at 200 Hz and check the sampled finite-difference
+   V/A/J bounds and branch continuity.
+
+This is the numerical sampled check of the previous paragraph, not
+`cartesian_path_feasible`: the derivative bounds are over a 257-point grid, and the
+output's guarantee is the S-curve plus that grid. Starting on a wrist singularity (the
+shipped all-zero pose has joint 5 at zero) can leave no continuous joint-space branch in
+the line's direction; when the first sampled step jumps, the path is rejected with a
+message, and jogging joint 5 away from zero first works. A line whose direction keeps the
+wrist flat can still certify. Playback interpolates the stored samples and shares the MoveJ
+clock, graphs and Parameters fields. The queue still inserts a rest-to-rest MoveJ
+transition to a `lin` start pose when the arm is elsewhere. The Lean module itself states
+no theorem and this implementation claims none.
+
+**Still planned.** These need additional path parameterisations:
+
 - `circle`/`ellipse`: a center, plane normal, two radii, start/end angle and direction
   define the arc; sample the Cartesian path and solve it the same way. An ellipse segment
   needs a parameterization decision (arc-length vs. angle) before the schema is fixed.

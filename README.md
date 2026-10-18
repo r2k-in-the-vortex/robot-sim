@@ -169,18 +169,41 @@ addition.
 
 ### Motion tab
 
-The Motion tab builds and runs **MoveJ** commands: a straight line in joint
-space, one synchronized S-curve for all six joints, so every joint starts and
-stops together and the slowest one sets the pace. The 3D view stays visible in
-the center; the command editor and queue are on the left and the live graphs
-are along the bottom.
+The Motion tab builds and runs two command types. The **MoveJ / MoveL** pair
+above the editor selects which one the draft is:
 
-Set the start and stop joint angles in degrees (J1–J6) and the command's
-velocity, acceleration and jerk request. **From current** fills the start from
-the arm's present pose; **From last queued** fills it from the end of the last
-queued command. Adding a command chains the next draft's start to the stop just
+- **MoveJ** is a straight line in joint space, one synchronized S-curve for all
+  six joints, so every joint starts and stops together and the slowest one sets
+  the pace.
+- **MoveL** is a straight line for the tool in Cartesian space: the position is
+  affine and the orientation is a spherical interpolation between the endpoint
+  rotations. The app samples the line, solves each sample with the closed-form
+  IK, checks that the shoulder/elbow branch stays continuous and that no joint
+  jumps too far between samples, then times the path with a rest-to-rest
+  S-curve. The Cartesian endpoint is reached exactly at every sample; playback
+  interpolates between samples for display.
+
+The 3D view stays visible in the center; the command editor and queue are on
+the left and the live graphs are along the bottom. MoveJ takes start and stop
+joint angles in degrees (J1–J6); MoveL takes start and stop poses as X/Y/Z in
+model units and roll/pitch/yaw in degrees (ZYX). The two representations are
+kept in step when the mode changes. **From current** fills the start from the
+arm's present pose; **From last queued** fills it from the end of the last
+queued command; the stop's **From current** and **Copy start** do what their
+names say. Adding a command chains the next draft's start to the stop just
 added. The effective-limits table shows the per-joint values after the physical
 limits cap the request, and the amber line names every capped component.
+
+MoveL uses the same per-joint V/A/J request. Its planner is conservative about
+the path: it estimates the joint-space derivative bounds by sampling the line,
+picks the slowest feasible S-curve from the M5 inequalities, and **refuses** a
+line it cannot certify instead of emitting an over-limit trajectory. Starting
+on a wrist singularity (the all-zero pose has joint 5 at zero) can leave no
+continuous joint-space branch in the line's direction; that case is refused
+with a message, and jogging joint 5 away from zero first works. A line whose
+direction keeps the wrist flat can still certify. As with MoveJ, a transition
+MoveJ is inserted from the current pose to the line's start whenever they
+differ.
 
 **Add to queue** appends the draft. The queue lists each command with its
 planned duration; **Remove**, **Clear queue**, **Play all**, **Pause/Resume**,
@@ -192,7 +215,9 @@ JSON. Commands are rest-to-rest, so the arm reaches zero velocity at each
 junction; waypoint blending is a future command type.
 
 **Command JSON** and **Queue JSON** are copyable and loadable. A command is one
-`{"type": "movej", ...}` object; a queue is
+`{"type": "movej", ...}` or
+`{"type": "lin", "start": {"position": [x, y, z], "rpy_deg": [r, p, y]}, "stop": {…}, "limits": {…}}`
+object; a queue is
 `{"schema": "robot-app.motion-queue", "version": 1, "commands": [...]}` (a bare
 array is accepted too). Loading validates and plans first, so a malformed queue
 leaves the existing one untouched.
@@ -200,8 +225,8 @@ leaves the existing one untouched.
 The graphs show joint angles, tool XYZ and unwrapped ZYX orientation over the
 whole planned motion, with a cursor at the playback time. The arm in the 3D
 view, the Parameters-tab joint fields, and the cursor all describe the same
-instant. Only MoveJ is implemented; Cartesian lines, arcs and waypoint blending
-are planned.
+instant. MoveJ and MoveL are implemented; arcs and waypoint blending are
+planned.
 
 ## Inverse kinematics
 
@@ -221,7 +246,7 @@ The derivation is in the *Inverse kinematics* section of
 | --- | --- |
 | `crates/robot-kinematics` | DH transforms, forward kinematics, closed-form inverse kinematics |
 | `crates/robot-dynamics` | Wrench frame algebra, gravity and inertia compensation |
-| `crates/robot-motion` | Jerk-limited S-curve planning, synchronization, tracking and supervision |
+| `crates/robot-motion` | Jerk-limited S-curve planning, synchronization, Cartesian line sampling, tracking and supervision |
 | `crates/robot-motion-demo` | Interactive 1-DOF planner test bench: limits and boundary states in, planned q/v/a/j graphs out |
 | `crates/robot-model` | Parameter types and `robot_parameters.json` persistence |
 | `crates/robot-app` | Bevy + egui desktop application |

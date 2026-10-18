@@ -14,6 +14,9 @@
 //!   also `Field`-generic: every duration and jerk is rational when the inputs are.
 //! * [`plan`] is the optimal 7-phase planner (M1-opt). It needs `sqrt`/`cbrt` and is
 //!   `f64`-only; it is tested against the exact golden corpus with a declared tolerance.
+//! * [`linear`] is the sampled Cartesian straight-line layer: the Rust counterpart of
+//!   `Motion.Linear` plus a numerical, sampled time law for the application's `lin`
+//!   command. It is allocation-free and fills caller-provided sample buffers.
 //!
 //! Production instantiates `f64` and nothing else. The crate is `no_std`, allocates
 //! nothing, and has a fixed-capacity `Profile`; `MAX_PHASES` is backed by the Lean
@@ -29,6 +32,7 @@ pub mod conservative;
 pub mod error;
 pub mod general;
 pub mod harness;
+pub mod linear;
 pub mod math;
 pub mod plan;
 pub mod plant;

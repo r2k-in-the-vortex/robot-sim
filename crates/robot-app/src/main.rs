@@ -24,6 +24,7 @@ mod dialogs;
 mod jog;
 mod mesh;
 mod motion;
+mod motion_linear;
 mod motion_ui;
 mod pyformat;
 mod scene;
