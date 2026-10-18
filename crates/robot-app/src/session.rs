@@ -76,7 +76,7 @@ use robot_model::{
     DHParameters, DhRow, Document, JointMotionLimits, MESH_COUNT, MeshSettings, MotionLimits,
 };
 
-use crate::jog::{self, Axis};
+use crate::jog::{JogMode, JogTarget, PoseJog};
 use crate::pyformat::{format_g, format_plus_g, format_precision_g};
 use crate::solve;
 
@@ -91,6 +91,32 @@ pub const ROTATION_STEP_ERROR: &str = "Rotation step must be a finite positive a
 pub const NO_SOLUTION: &str = "No exact-pose IK solution; robot was not moved.";
 /// `_copy_t6_position`'s status line (`simulator.py:316`).
 pub const COPIED: &str = "Copied T6 pose and joint angles";
+
+/// The status sentence for one jog of `amount` — `_jog_joint`'s report (`simulator.py:336`),
+/// and the four pose handlers' (`:405`, `:414`, `:423`, `:432`).
+///
+/// One function rather than nine, because the sentence embeds the signed amount and both modes
+/// must spell it the same way: a one-second hold at rate `step` has to read exactly as one
+/// click does. `amount` is a length for the translations and degrees for the rotations and the
+/// joint moves, which is the unit each target's step field already speaks.
+fn describe_jog(target: JogTarget, amount: f64) -> String {
+    let signed = format_plus_g(amount);
+    match target {
+        JogTarget::Joint(joint) => format!("Jogged J{} {signed} deg", joint + 1),
+        JogTarget::Pose(PoseJog::BaseTranslation(axis)) => {
+            format!("Moved base {} {signed}", axis.letter())
+        }
+        JogTarget::Pose(PoseJog::ToolTranslation(axis)) => {
+            format!("Moved tool {} {signed}", axis.letter())
+        }
+        JogTarget::Pose(PoseJog::BaseRotation(axis)) => {
+            format!("Rotated base R{} {signed} deg", axis.letter())
+        }
+        JogTarget::Pose(PoseJog::ToolRotation(axis)) => {
+            format!("Rotated tool R{} {signed} deg", axis.letter())
+        }
+    }
+}
 
 /// A failure the UI puts in a messagebox, keeping the reference's own title.
 ///
@@ -169,6 +195,12 @@ pub struct Session {
     pub jog_step: String,
     pub rotation_step: String,
     pub joint_step: String,
+    /// Which mode the panel's radio pair selects. [`JogMode::Step`] is the reference's
+    /// behavior, and the default is load-bearing: an upgrade must not change what a click does.
+    pub jog_mode: JogMode,
+    /// The continuous jog in flight, if any. Private: the panel only asks whether one is
+    /// running ([`Session::jogging`]) and drives or ends it through the methods below.
+    jog_hold: Option<JogHold>,
     /// The jog status line under the 3D view (`self.jog_status_label`).
     pub status: String,
     /// The pending messagebox, if any. The reference has no such state — it raises a modal
@@ -177,6 +209,29 @@ pub struct Session {
     pub notice: Option<Failure>,
     /// The file Save and Load default to, and the one the startup load reads.
     pub config_path: PathBuf,
+}
+
+/// A continuous jog in flight: the button held, and the state its amount is measured from.
+///
+/// The pose the hold started on is deliberately not stored. It is `fk` of `start_angles` under
+/// `parameters`, computed by [`Session::jog_by`], so there is one derivation of it rather than
+/// two that could disagree after an edit.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct JogHold {
+    target: JogTarget,
+    direction: i32,
+    /// The step field at the press, read as a rate: this many units (or degrees) per second.
+    rate: f64,
+    /// The timestamp of the press, in the same seconds as every later `now`.
+    start_time: f64,
+    /// The arm's angles at the press, which every frame's *target pose* is measured from.
+    /// The branch that reaches it is chosen against the angles the arm holds now, so a
+    /// wind-up built frame by frame survives for as long as the hold does.
+    start_angles: [f64; JOINT_COUNT],
+    /// The DH table as it stood at the press. A sustained jog is one operation, so an edit
+    /// mid-hold steers the next jog rather than the one in flight — the same rule that makes
+    /// an unapplied edit take effect on the next click (`simulator.py:328`).
+    parameters: DHParameters,
 }
 
 impl Session {
@@ -190,6 +245,8 @@ impl Session {
             jog_step: String::from("1"),
             rotation_step: String::from("5"),
             joint_step: String::from("5"),
+            jog_mode: JogMode::default(),
+            jog_hold: None,
             status: String::new(),
             notice: None,
             config_path,
@@ -442,230 +499,290 @@ impl Session {
         Ok(())
     }
 
-    /// One joint jog, `_jog_joint` (`simulator.py:327-341`).
+    /// One click's jog — `_jog_cartesian`, `_jog_tool_translation`, `_jog_rotation_world`,
+    /// `_jog_rotation_tool` and `_jog_joint` (`simulator.py:327-341`, `:399-433`).
+    ///
+    /// The four pose handlers share `_pose_jog` (`:362-397`); this shares [`Self::jog_by`]
+    /// with the held-button mode, so the two modes differ only in the amount they ask for and
+    /// the sentence they report.
     ///
     /// The move is applied to the stored angles and then written back over all six fields,
     /// which is what discards an unapplied edit to a joint field.
-    pub fn jog_joint(
+    pub fn jog(
         &mut self,
-        joint: usize,
+        target: JogTarget,
         direction: i32,
         document: &mut Document,
         angles: &mut [f64; JOINT_COUNT],
-    ) {
-        let step_text = self.joint_step.clone();
-        let outcome = (|| -> Result<String, String> {
-            let parameters = DHParameters::new(self.read_dh_rows()?);
-            let step = Self::read_step(&step_text, JOINT_STEP_ERROR)?;
-            let mut requested = *angles;
-            requested[joint] += f64::from(direction) * step;
-            self.apply_joint_solution(&parameters, &requested, document, angles);
-            Ok(format!(
-                "Jogged J{} {} deg",
-                joint + 1,
-                format_plus_g(f64::from(direction) * step)
-            ))
-        })();
-        self.status = outcome.unwrap_or_else(|message| message);
-    }
-
-    /// One base-frame translation jog, `_jog_cartesian` (`simulator.py:399-406`).
-    ///
-    /// The direction is the button's whole meaning and it is applied twice: once to the
-    /// target pose and once in the status line, exactly as the reference's two lambdas each
-    /// spell out `direction * step` (`:403-404`). Dropping it from the first leaves a pair of
-    /// buttons that jog the same way while one of them reports the other.
-    pub fn jog_cartesian(
-        &mut self,
-        axis: Axis,
-        direction: i32,
-        document: &mut Document,
-        angles: &mut [f64; JOINT_COUNT],
-    ) {
-        let step_text = self.jog_step.clone();
-        let describe = |step: f64| {
-            format!(
-                "Moved base {} {}",
-                axis.letter(),
-                format_plus_g(f64::from(direction) * step)
-            )
-        };
-        self.pose_jog(
-            &step_text,
-            JOG_STEP_ERROR,
-            document,
-            angles,
-            |pose, step| jog::offset_pose_translation(pose, axis, f64::from(direction) * step),
-            describe,
-        );
-    }
-
-    /// One tool-frame translation jog, `_jog_tool_translation` (`simulator.py:408-415`).
-    ///
-    /// As above, the direction reaches the target pose (`:412`) and the report (`:413`).
-    pub fn jog_tool_translation(
-        &mut self,
-        axis: Axis,
-        direction: i32,
-        document: &mut Document,
-        angles: &mut [f64; JOINT_COUNT],
-    ) {
-        let step_text = self.jog_step.clone();
-        let describe = |step: f64| {
-            format!(
-                "Moved tool {} {}",
-                axis.letter(),
-                format_plus_g(f64::from(direction) * step)
-            )
-        };
-        self.pose_jog(
-            &step_text,
-            JOG_STEP_ERROR,
-            document,
-            angles,
-            |pose, step| jog::offset_pose_tool_translation(pose, axis, f64::from(direction) * step),
-            describe,
-        );
-    }
-
-    /// One base-frame rotation jog, `_jog_rotation_world` (`simulator.py:417-424`).
-    pub fn jog_rotation_world(
-        &mut self,
-        axis: Axis,
-        direction: i32,
-        document: &mut Document,
-        angles: &mut [f64; JOINT_COUNT],
-    ) {
-        self.rotation_jog(
-            axis,
-            direction,
-            document,
-            angles,
-            jog::rotate_pose_world_axis,
-            "Rotated base",
-        );
-    }
-
-    /// One tool-frame rotation jog, `_jog_rotation_tool` (`simulator.py:426-433`).
-    pub fn jog_rotation_tool(
-        &mut self,
-        axis: Axis,
-        direction: i32,
-        document: &mut Document,
-        angles: &mut [f64; JOINT_COUNT],
-    ) {
-        self.rotation_jog(
-            axis,
-            direction,
-            document,
-            angles,
-            jog::rotate_pose_tool_axis,
-            "Rotated tool",
-        );
-    }
-
-    /// The four rotation jogs differ only in which rotation and which verb, both of which
-    /// arrive as arguments — the reference writes them out twice, once per frame.
-    ///
-    /// The signed angle is what the button means: `math.radians(direction * step)` in the
-    /// reference's two rotation lambdas (`simulator.py:420`, `:429`), the sign applied
-    /// before the conversion exactly as there, and the same signed value in the report.
-    fn rotation_jog(
-        &mut self,
-        axis: Axis,
-        direction: i32,
-        document: &mut Document,
-        angles: &mut [f64; JOINT_COUNT],
-        rotate: fn(&Pose<f64>, Axis, f64) -> Pose<f64>,
-        verb: &'static str,
-    ) {
-        let step_text = self.rotation_step.clone();
-        let describe = |step: f64| {
-            format!(
-                "{verb} R{} {} deg",
-                axis.letter(),
-                format_plus_g(f64::from(direction) * step)
-            )
-        };
-        self.pose_jog(
-            &step_text,
-            ROTATION_STEP_ERROR,
-            document,
-            angles,
-            move |pose, step| rotate(pose, axis, (f64::from(direction) * step).to_radians()),
-            describe,
-        );
-    }
-
-    /// The shared body of all four Cartesian jogs, `_pose_jog` (`simulator.py:362-397`).
-    ///
-    /// Everything that can fail is collected inside one closure so that a single status-line
-    /// assignment covers all of it, exactly as the reference's `try` does. Nothing is written
-    /// to the stored state before the solve succeeds, which is what makes the jog
-    /// all-or-nothing: an unreachable target leaves the arm where it was and says
-    /// [`NO_SOLUTION`].
-    fn pose_jog(
-        &mut self,
-        step_text: &str,
-        step_error: &str,
-        document: &mut Document,
-        angles: &mut [f64; JOINT_COUNT],
-        target_of: impl Fn(&Pose<f64>, f64) -> Pose<f64>,
-        describe: impl Fn(f64) -> String,
     ) {
         let outcome = (|| -> Result<String, String> {
             // The DH fields, not the applied document — see the module docs.
             let parameters = DHParameters::new(self.read_dh_rows()?);
-            let current = *angles;
-            let step = Self::read_step(step_text, step_error)?;
-            let geometry = geometry_of(&parameters)?;
-            let current_pose = fk(&geometry, &parameters.total_angles_rad(&current));
-            let requested = target_of(&current_pose, step);
-            let solutions =
-                solve::solve(&parameters, &requested).map_err(|error| error.to_string())?;
-
-            // `min(solutions, key=Σ wrap(angle - current)²)` (`simulator.py:392-395`): the
-            // branch nearest the pose the arm is already in, so a jog continues in the
-            // configuration it found rather than flipping the elbow or the shoulder.
-            //
-            // The reference compares *runtime* radians and this compares totals; the two
-            // differ by the joint's static offset, which cancels in the subtraction. A
-            // whole-turn discrepancy cancels there too, and that is the point of this metric
-            // rather than a flaw in it: a candidate is defined modulo a full turn, so the
-            // candidate a turn away *is* the one the arm is holding. Selecting is all this
-            // step does. The turn it just ignored is the placement's to resolve, below.
-            // Using the totals keeps the reference's own `total_angles_rad` as the single
-            // place the offset is applied.
-            let reference = robot_kinematics::Solution {
-                angles: parameters.total_angles_rad(&current),
-                shoulder: 1,
-                elbow: 1,
-            };
-            let Some(chosen) = solutions.nearest_to(&reference) else {
-                return Err(String::from(NO_SOLUTION));
-            };
-
-            // **Divergence.** The reference stores what the solver returned, verbatim
-            // (`:396` through `_apply_joint_solution`'s `math.degrees`, `:343-353`), so a
-            // wound joint loses its whole turn: the issue's J6 at 400° comes back at 40° and
-            // the arm spins. `representative_near` places the chosen candidate beside the
-            // arm's own continuous angles instead, so the motion the jog implies is the
-            // at-most-half-turn wrapped difference and the winding survives. See the module
-            // docs for why the selection above is still the reference's.
-            let placed = chosen.representative_near(&reference);
-            // Back to runtime degrees for the stored state: the reference's change of
-            // variable, with the offset coming back off *without* a wrap, because `placed` is
-            // already the representative beside the joint.
-            let solved = core::array::from_fn(|joint| {
-                units::rad_to_deg(
-                    placed.angles[joint]
-                        - units::deg_to_rad(parameters.joints[joint].theta_offset_deg),
-                )
-            });
-            self.apply_joint_solution(&parameters, &solved, document, angles);
-            Ok(describe(step))
+            let step = Self::read_step(self.step_text(target), Self::step_error(target))?;
+            let amount = f64::from(direction) * step;
+            let start = *angles;
+            self.jog_by(target, amount, &parameters, &start, document, angles)?;
+            Ok(describe_jog(target, amount))
         })();
         self.status = outcome.unwrap_or_else(|message| message);
+    }
+
+    /// The field a target's amount is read from: `jog_step` for the translations,
+    /// `rotation_step` for the rotations, `joint_step` for the joint moves
+    /// (`simulator.py:402`, `:411`, `:420`, `:429`, `:331`).
+    fn step_text(&self, target: JogTarget) -> &str {
+        match target {
+            JogTarget::Pose(pose) if pose.rotates() => &self.rotation_step,
+            JogTarget::Pose(_) => &self.jog_step,
+            JogTarget::Joint(_) => &self.joint_step,
+        }
+    }
+
+    /// The complaint belonging to that field, `_read_step`'s three messages
+    /// (`simulator.py:331`, `:402`, `:411`, `:420`, `:429`).
+    fn step_error(target: JogTarget) -> &'static str {
+        match target {
+            JogTarget::Pose(pose) if pose.rotates() => ROTATION_STEP_ERROR,
+            JogTarget::Pose(_) => JOG_STEP_ERROR,
+            JogTarget::Joint(_) => JOINT_STEP_ERROR,
+        }
+    }
+
+    /// The shared body of both modes, `_pose_jog` (`simulator.py:362-397`) from its geometry
+    /// check onward.
+    ///
+    /// `amount` is signed and in the units of the target's step field: a length for the
+    /// translations, degrees for the rotations and the joint moves. `start_angles` is the
+    /// configuration the amount is measured from — the angles the arm holds, for a click; the
+    /// angles it held at the press, for a hold. It is the target's starting point only: a
+    /// pose jog chooses its branch, and places its answer, beside the angles the arm holds
+    /// now ([`Self::jog_pose_to`]), which for a hold are the previous frame's.
+    ///
+    /// The two arms are deliberately different shapes. A pose jog needs the geometry and the
+    /// solver; a joint jog is `_jog_joint` (`simulator.py:327-341`) and touches neither, so a
+    /// table the pose jogs refuse can still be joint-jogged.
+    fn jog_by(
+        &mut self,
+        target: JogTarget,
+        amount: f64,
+        parameters: &DHParameters,
+        start_angles: &[f64; JOINT_COUNT],
+        document: &mut Document,
+        angles: &mut [f64; JOINT_COUNT],
+    ) -> Result<(), String> {
+        match target {
+            JogTarget::Joint(joint) => {
+                let mut requested = *start_angles;
+                requested[joint] += amount;
+                self.apply_joint_solution(parameters, &requested, document, angles);
+                Ok(())
+            }
+            JogTarget::Pose(pose) => {
+                let geometry = geometry_of(parameters)?;
+                // The pose the amount is measured from: `fk` of the *start* angles, never of
+                // the angles the arm holds now. That is what makes a hold absolute — each
+                // frame asks for the press's pose plus the whole elapsed time, not the last
+                // frame's pose plus a delta, so frame jitter cannot bend the path.
+                //
+                // The *branch* is another matter and is chosen against the angles the arm
+                // holds now, by `jog_pose_to`: see the note there on why a hold must follow
+                // its own previous frames the way a click follows the previous click.
+                let start_pose = fk(&geometry, &parameters.total_angles_rad(start_angles));
+                let requested = pose.offset(&start_pose, amount);
+                self.jog_pose_to(parameters, &requested, document, angles)
+            }
+        }
+    }
+
+    /// The solver tail of `_pose_jog` (`simulator.py:388-397`), shared by both modes.
+    ///
+    /// Everything that can fail is collected here so that a single status-line assignment
+    /// covers all of it, exactly as the reference's `try` does. Nothing is written to the
+    /// stored state before the solve succeeds, which is what makes the jog all-or-nothing: an
+    /// unreachable target leaves the arm where it was and says [`NO_SOLUTION`].
+    fn jog_pose_to(
+        &mut self,
+        parameters: &DHParameters,
+        requested: &Pose<f64>,
+        document: &mut Document,
+        angles: &mut [f64; JOINT_COUNT],
+    ) -> Result<(), String> {
+        let solutions = solve::solve(parameters, requested).map_err(|error| error.to_string())?;
+
+        // `min(solutions, key=Σ wrap(angle - current)²)` (`simulator.py:392-395`): the
+        // branch nearest the pose the arm is already in, so a jog continues in the
+        // configuration it found rather than flipping the elbow or the shoulder.
+        //
+        // The reference compares *runtime* radians and this compares totals; the two
+        // differ by the joint's static offset, which cancels in the subtraction. A
+        // whole-turn discrepancy cancels there too, and that is the point of this metric
+        // rather than a flaw in it: a candidate is defined modulo a full turn, so the
+        // candidate a turn away *is* the one the arm is holding. Selecting is all this
+        // step does. The turn it just ignored is the placement's to resolve, below.
+        // Using the totals keeps the reference's own `total_angles_rad` as the single
+        // place the offset is applied.
+        //
+        // "Current" is the arm's stored angles, for a hold as much as for a click: each
+        // frame selects against what the previous frame left behind. Selecting against the
+        // press-time angles instead would make a hold skip the intermediate branches a
+        // sequence of clicks walks through — at the shipped arm's J5 = 45° pose, a held base
+        // Rz+ jog would never wind J6 past a full turn the way the same jog in step mode
+        // does, so the two modes would disagree about the joint's index. Measuring the
+        // *target* from the press still keeps the path absolute; only the choice of branch
+        // follows the arm.
+        let reference = robot_kinematics::Solution {
+            angles: parameters.total_angles_rad(angles),
+            shoulder: 1,
+            elbow: 1,
+        };
+        let Some(chosen) = solutions.nearest_to(&reference) else {
+            return Err(String::from(NO_SOLUTION));
+        };
+
+        // **Divergence.** The reference stores what the solver returned, verbatim
+        // (`:396` through `_apply_joint_solution`'s `math.degrees`, `:343-353`), so a
+        // wound joint loses its whole turn: the issue's J6 at 400° comes back at 40° and
+        // the arm spins. `representative_near` places the chosen candidate beside the
+        // arm's own continuous angles instead, so the motion the jog implies is the
+        // at-most-half-turn wrapped difference and the winding survives. See the module
+        // docs for why the selection above is still the reference's.
+        let placed = chosen.representative_near(&reference);
+        // Back to runtime degrees for the stored state: the reference's change of
+        // variable, with the offset coming back off *without* a wrap, because `placed` is
+        // already the representative beside the joint.
+        let solved = core::array::from_fn(|joint| {
+            units::rad_to_deg(
+                placed.angles[joint] - units::deg_to_rad(parameters.joints[joint].theta_offset_deg),
+            )
+        });
+        self.apply_joint_solution(parameters, &solved, document, angles);
+        Ok(())
+    }
+
+    /// Whether a continuous jog is in flight.
+    pub fn jogging(&self) -> bool {
+        self.jog_hold.is_some()
+    }
+
+    /// Start a continuous jog, or refresh the one already in flight.
+    ///
+    /// `now` is the frame's timestamp in seconds, read from the same clock every frame. The
+    /// first call for a press freezes the step field, the DH table and the arm's angles, and
+    /// every later frame measures the *target pose* from those, so a dropped, late or
+    /// reordered frame changes nothing about where the arm belongs — only when it is drawn.
+    /// The branch that reaches the target is chosen against the angles the arm holds now
+    /// ([`Session::jog_pose_to`]): a hold follows its own frames the way successive clicks
+    /// follow each other, so it winds a joint past a full turn exactly as they do instead of
+    /// skipping the intermediate branches in one absolute placement.
+    ///
+    /// A press the fields refuse starts nothing and says why in the status line, exactly as a
+    /// click would. The button is still down, so the next frame asks again and gets the same
+    /// sentence; nothing moves in the meantime.
+    pub fn begin_jog(
+        &mut self,
+        target: JogTarget,
+        direction: i32,
+        now: f64,
+        angles: &[f64; JOINT_COUNT],
+    ) {
+        if self
+            .jog_hold
+            .as_ref()
+            .is_some_and(|hold| hold.target == target && hold.direction == direction)
+        {
+            return;
+        }
+        let outcome = (|| -> Result<JogHold, String> {
+            // The same fields, in the same order, that a click reads them — see [`Self::jog`].
+            let parameters = DHParameters::new(self.read_dh_rows()?);
+            let rate = Self::read_step(self.step_text(target), Self::step_error(target))?;
+            // A pose hold is refused here, at the press, if the table cannot carry one; a
+            // joint hold never needs the geometry (`_jog_joint`, `simulator.py:327-341`).
+            if let JogTarget::Pose(_) = target {
+                geometry_of(&parameters)?;
+            }
+            Ok(JogHold {
+                target,
+                direction,
+                rate,
+                start_time: now,
+                start_angles: *angles,
+                parameters,
+            })
+        })();
+        match outcome {
+            Ok(hold) => self.jog_hold = Some(hold),
+            Err(message) => {
+                // A press that cannot start a jog also ends whatever was in flight: the
+                // pointer has moved to a button this table cannot follow.
+                self.jog_hold = None;
+                self.status = message;
+            }
+        }
+    }
+
+    /// Drive the hold in flight to `now`.
+    pub fn drive_jog(
+        &mut self,
+        now: f64,
+        document: &mut Document,
+        angles: &mut [f64; JOINT_COUNT],
+    ) {
+        // `JogHold` is `Copy`, so the hold is read out rather than borrowed while `jog_by`
+        // writes the state it was read from.
+        if let Some(hold) = self.jog_hold {
+            self.advance_jog(&hold, now, document, angles);
+        }
+    }
+
+    /// End the hold in flight at `now`, leaving the arm where the release timestamp says.
+    ///
+    /// The hold is taken out before the final move, so a release that fails cannot leave a run
+    /// measuring a button nobody is holding. Without a hold this does nothing, which is what
+    /// lets the panel call it on every frame that saw no button held.
+    pub fn release_jog(
+        &mut self,
+        now: f64,
+        document: &mut Document,
+        angles: &mut [f64; JOINT_COUNT],
+    ) {
+        let Some(hold) = self.jog_hold.take() else {
+            return;
+        };
+        self.advance_jog(&hold, now, document, angles);
+    }
+
+    /// Put the arm where `hold` says it should be at `now`.
+    fn advance_jog(
+        &mut self,
+        hold: &JogHold,
+        now: f64,
+        document: &mut Document,
+        angles: &mut [f64; JOINT_COUNT],
+    ) {
+        // Clamped at zero, so a timestamp that is somehow behind the press asks for nothing
+        // rather than for a reverse jog.
+        let elapsed = (now - hold.start_time).max(0.0);
+        // The press frame asks for nothing. Skipping it keeps the status line from flashing
+        // "+0" and the fields from being rewritten for a move that is not one.
+        if elapsed == 0.0 {
+            return;
+        }
+        let amount = f64::from(hold.direction) * hold.rate * elapsed;
+        match self.jog_by(
+            hold.target,
+            amount,
+            &hold.parameters,
+            &hold.start_angles,
+            document,
+            angles,
+        ) {
+            Ok(()) => self.status = describe_jog(hold.target, amount),
+            // The arm stays where the last solvable frame put it and the hold keeps
+            // measuring: reachability along a ray is not monotone, so a later frame — or the
+            // release — may land somewhere it can solve after all.
+            Err(message) => self.status = message,
+        }
     }
 
     /// Store a solved or jogged configuration at full precision and refresh the fields from
@@ -946,8 +1063,27 @@ pub fn default_config_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jog::{self, Axis, JogFrame};
     use robot_kinematics::{FRAME_COUNT, Mat3, Vec3, carrier_pose};
     use robot_model::MESH_FRAME_NAMES;
+
+    /// The target each of the reference's five handlers carries (`simulator.py:399`, `:408`,
+    /// `:417`, `:426`, `:327`), so a test reads like the handler it replaces.
+    fn base(axis: Axis) -> JogTarget {
+        JogTarget::cartesian(JogFrame::Base, false, axis)
+    }
+    fn tool(axis: Axis) -> JogTarget {
+        JogTarget::cartesian(JogFrame::Tool, false, axis)
+    }
+    fn rotate_base(axis: Axis) -> JogTarget {
+        JogTarget::cartesian(JogFrame::Base, true, axis)
+    }
+    fn rotate_tool(axis: Axis) -> JogTarget {
+        JogTarget::cartesian(JogFrame::Tool, true, axis)
+    }
+    fn joint(index: usize) -> JogTarget {
+        JogTarget::Joint(index)
+    }
 
     /// A session holding the shipped document, with the runtime angles at zero.
     fn session() -> (Session, Document, [f64; JOINT_COUNT]) {
@@ -1179,17 +1315,17 @@ mod tests {
     #[test]
     fn a_joint_jog_moves_one_joint_and_reports_the_reference_string() {
         let (mut session, mut document, mut angles) = session();
-        session.jog_joint(0, 1, &mut document, &mut angles);
+        session.jog(joint(0), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Jogged J1 +5 deg");
         assert_eq!(angles[0], 5.0);
         assert_eq!(session.joint_angles[0], "5");
 
-        session.jog_joint(3, -1, &mut document, &mut angles);
+        session.jog(joint(3), -1, &mut document, &mut angles);
         assert_eq!(session.status, "Jogged J4 -5 deg");
         assert_eq!(angles[3], -5.0);
 
         session.joint_step = String::from("0.25");
-        session.jog_joint(5, 1, &mut document, &mut angles);
+        session.jog(joint(5), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Jogged J6 +0.25 deg");
         assert_eq!(angles[5], 0.25);
     }
@@ -1203,7 +1339,7 @@ mod tests {
         session.dh[1][2] = String::from("70");
         assert_eq!(document.parameters.joints[1].a, 25.0, "not applied yet");
 
-        session.jog_joint(0, 1, &mut document, &mut angles);
+        session.jog(joint(0), 1, &mut document, &mut angles);
         assert_eq!(document.parameters.joints[1].a, 70.0);
         assert_eq!(session.status, "Jogged J1 +5 deg");
     }
@@ -1212,7 +1348,7 @@ mod tests {
     fn a_joint_jog_discards_an_unapplied_joint_field_edit() {
         let (mut session, mut document, mut angles) = session();
         session.joint_angles[2] = String::from("90");
-        session.jog_joint(0, 1, &mut document, &mut angles);
+        session.jog(joint(0), 1, &mut document, &mut angles);
         assert_eq!(angles[2], 0.0);
         assert_eq!(
             session.joint_angles[2], "0",
@@ -1224,7 +1360,7 @@ mod tests {
     fn a_joint_jog_with_a_bad_dh_field_is_refused_with_that_message() {
         let (mut session, mut document, mut angles) = session();
         session.dh[4][0] = String::from("oops");
-        session.jog_joint(1, 1, &mut document, &mut angles);
+        session.jog(joint(1), 1, &mut document, &mut angles);
         assert_eq!(session.status, "could not convert string to float: 'oops'");
         assert_eq!(angles, [0.0; JOINT_COUNT], "nothing moved");
     }
@@ -1233,7 +1369,7 @@ mod tests {
     fn a_joint_jog_with_a_bad_step_is_refused_with_that_message() {
         let (mut session, mut document, mut angles) = session();
         session.joint_step = String::from("-5");
-        session.jog_joint(1, 1, &mut document, &mut angles);
+        session.jog(joint(1), 1, &mut document, &mut angles);
         assert_eq!(session.status, JOINT_STEP_ERROR);
         assert_eq!(angles, [0.0; JOINT_COUNT]);
     }
@@ -1243,35 +1379,35 @@ mod tests {
     #[test]
     fn a_base_translation_jog_reports_the_reference_string() {
         let (mut session, mut document, mut angles) = session();
-        session.jog_cartesian(Axis::Y, 1, &mut document, &mut angles);
+        session.jog(base(Axis::Y), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Moved base Y +1");
 
-        session.jog_cartesian(Axis::X, -1, &mut document, &mut angles);
+        session.jog(base(Axis::X), -1, &mut document, &mut angles);
         assert_eq!(session.status, "Moved base X -1");
 
         session.jog_step = String::from("2.5");
-        session.jog_cartesian(Axis::Z, 1, &mut document, &mut angles);
+        session.jog(base(Axis::Z), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Moved base Z +2.5");
     }
 
     #[test]
     fn a_tool_translation_jog_reports_the_reference_string() {
         let (mut session, mut document, mut angles) = session();
-        session.jog_tool_translation(Axis::Z, 1, &mut document, &mut angles);
+        session.jog(tool(Axis::Z), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Moved tool Z +1");
     }
 
     #[test]
     fn the_rotation_jogs_report_the_reference_strings() {
         let (mut session, mut document, mut angles) = session();
-        session.jog_rotation_world(Axis::X, 1, &mut document, &mut angles);
+        session.jog(rotate_base(Axis::X), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Rotated base RX +5 deg");
 
-        session.jog_rotation_tool(Axis::X, 1, &mut document, &mut angles);
+        session.jog(rotate_tool(Axis::X), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Rotated tool RX +5 deg");
 
         session.rotation_step = String::from("15");
-        session.jog_rotation_tool(Axis::Z, -1, &mut document, &mut angles);
+        session.jog(rotate_tool(Axis::Z), -1, &mut document, &mut angles);
         assert_eq!(session.status, "Rotated tool RZ -15 deg");
     }
 
@@ -1281,7 +1417,7 @@ mod tests {
         // tool origin through forward kinematics rather than trusting the angles.
         let (mut session, mut document, mut angles) = session();
         let before = tool_position(&document, &angles);
-        session.jog_cartesian(Axis::Y, 1, &mut document, &mut angles);
+        session.jog(base(Axis::Y), 1, &mut document, &mut angles);
         let after = tool_position(&document, &angles);
         assert!(
             (after[1] - before[1] - 1.0).abs() < 1e-9,
@@ -1295,7 +1431,7 @@ mod tests {
     fn a_rotation_jog_keeps_the_tool_origin_and_turns_it_by_the_step() {
         let (mut session, mut document, mut angles) = session();
         let before = carrier_pose_of(&document, &angles)[FRAME_COUNT - 1];
-        session.jog_rotation_world(Axis::Z, 1, &mut document, &mut angles);
+        session.jog(rotate_base(Axis::Z), 1, &mut document, &mut angles);
         let after = carrier_pose_of(&document, &angles)[FRAME_COUNT - 1];
         assert!(
             before.p.distance(after.p) < 1e-9,
@@ -1378,7 +1514,7 @@ mod tests {
         session.sync_joint_angles(&angles);
         let started = angles;
         let before = tool_pose_of(&document, &angles);
-        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        session.jog(base(Axis::X), 1, &mut document, &mut angles);
         let after = tool_pose_of(&document, &angles);
 
         assert_eq!(session.status, "Moved base X +1");
@@ -1438,7 +1574,7 @@ mod tests {
         let (mut session, mut document, mut angles) = session();
         angles[5] = 400.0;
         session.sync_joint_angles(&angles);
-        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        session.jog(base(Axis::X), 1, &mut document, &mut angles);
 
         assert_eq!(front_readout(angles[5]), "400.0°  idx 1");
 
@@ -1463,7 +1599,7 @@ mod tests {
         let (mut session, mut document, mut angles) = session();
         angles[5] = -400.0;
         session.sync_joint_angles(&angles);
-        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        session.jog(base(Axis::X), 1, &mut document, &mut angles);
 
         assert_eq!(session.status, "Moved base X +1");
         assert!(
@@ -1489,7 +1625,7 @@ mod tests {
         session.rotation_step = String::from("0.2");
         angles[5] = 359.9;
         session.sync_joint_angles(&angles);
-        session.jog_rotation_tool(Axis::Z, 1, &mut document, &mut angles);
+        session.jog(rotate_tool(Axis::Z), 1, &mut document, &mut angles);
 
         assert_eq!(session.status, "Rotated tool RZ +0.2 deg");
         assert!(
@@ -1517,7 +1653,7 @@ mod tests {
     fn a_joint_jogged_past_a_turn_keeps_its_winding_through_a_pose_jog() {
         let (mut session, mut document, mut angles) = session();
         session.joint_step = String::from("400");
-        session.jog_joint(5, 1, &mut document, &mut angles);
+        session.jog(joint(5), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Jogged J6 +400 deg");
         assert_eq!(
             angles[5], 400.0,
@@ -1525,7 +1661,7 @@ mod tests {
         );
 
         session.jog_step = String::from("1");
-        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        session.jog(base(Axis::X), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Moved base X +1");
         assert!(
             (angles[5] - 400.0).abs() < 1e-9,
@@ -1545,7 +1681,7 @@ mod tests {
         let (mut session, mut document, mut angles) = session();
         angles[5] = 400.0;
         session.sync_joint_angles(&angles);
-        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        session.jog(base(Axis::X), 1, &mut document, &mut angles);
 
         assert_eq!(session.status, "Moved base X +1");
         // What the reference would have stored: the wrapped angle, 40 degrees.
@@ -1574,7 +1710,7 @@ mod tests {
         let before = angles;
         let before_parameters = document.parameters;
         session.jog_step = String::from("1000000");
-        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        session.jog(base(Axis::X), 1, &mut document, &mut angles);
         assert_eq!(session.status, NO_SOLUTION);
         assert_eq!(angles, before, "the robot was not moved");
         assert_eq!(
@@ -1590,7 +1726,7 @@ mod tests {
         // line to say which parameter is wrong.
         let (mut session, mut document, mut angles) = session();
         session.dh[2][3] = String::from("45");
-        session.jog_cartesian(Axis::X, 1, &mut document, &mut angles);
+        session.jog(base(Axis::X), 1, &mut document, &mut angles);
         assert!(
             session.status.contains("joint 3 alpha"),
             "status was {:?}",
@@ -1610,7 +1746,7 @@ mod tests {
         session.jog_step = String::from("0.5");
         let mut previous = angles;
         for step in 0..10 {
-            session.jog_cartesian(Axis::Z, -1, &mut document, &mut angles);
+            session.jog(base(Axis::Z), -1, &mut document, &mut angles);
             assert_eq!(session.status, "Moved base Z -0.5");
             for (joint, (angle, was)) in angles.iter().zip(previous.iter()).enumerate() {
                 // The measured steps here are a degree or two; a branch flip is a half turn.
@@ -1630,7 +1766,7 @@ mod tests {
     fn a_pose_jog_applies_the_dh_fields_too() {
         let (mut session, mut document, mut angles) = session();
         session.dh[5][1] = String::from("30"); // joint 6's d, the tool offset
-        session.jog_cartesian(Axis::Y, 1, &mut document, &mut angles);
+        session.jog(base(Axis::Y), 1, &mut document, &mut angles);
         assert_eq!(session.status, "Moved base Y +1");
         assert_eq!(document.parameters.joints[5].d, 30.0);
     }
@@ -1639,7 +1775,7 @@ mod tests {
     fn a_pose_jog_leaves_the_mesh_settings_alone() {
         let (mut session, mut document, mut angles) = session();
         document.meshes[2].path = String::from("mesh/joint3.stl");
-        session.jog_cartesian(Axis::Y, 1, &mut document, &mut angles);
+        session.jog(base(Axis::Y), 1, &mut document, &mut angles);
         assert_eq!(document.meshes[2].path, "mesh/joint3.stl");
     }
 
@@ -1650,7 +1786,7 @@ mod tests {
         // ±180" pin here: a joint that has wound a turn keeps it, and
         // `a_pose_jog_keeps_the_winding_the_reference_discards` pins that instead.
         let (mut session, mut document, mut angles) = session();
-        session.jog_cartesian(Axis::Y, 1, &mut document, &mut angles);
+        session.jog(base(Axis::Y), 1, &mut document, &mut angles);
         let totals = document.parameters.total_angles_rad(&angles);
         let geometry = document.parameters.geometry().expect("shipped");
         let tool = fk(&geometry, &totals);
@@ -1718,16 +1854,16 @@ mod tests {
         ) {
             match self {
                 JogButton::BaseTranslation => {
-                    session.jog_cartesian(axis, direction, document, angles);
+                    session.jog(base(axis), direction, document, angles);
                 }
                 JogButton::BaseRotation => {
-                    session.jog_rotation_world(axis, direction, document, angles);
+                    session.jog(rotate_base(axis), direction, document, angles);
                 }
                 JogButton::ToolTranslation => {
-                    session.jog_tool_translation(axis, direction, document, angles);
+                    session.jog(tool(axis), direction, document, angles);
                 }
                 JogButton::ToolRotation => {
-                    session.jog_rotation_tool(axis, direction, document, angles);
+                    session.jog(rotate_tool(axis), direction, document, angles);
                 }
             }
         }
@@ -2045,10 +2181,373 @@ mod tests {
         assert_eq!(session.jog_step, "1");
         assert_eq!(session.rotation_step, "5");
         assert_eq!(session.joint_step, "5");
+        assert_eq!(session.jog_mode, JogMode::Step, "a click still steps");
+        assert!(!session.jogging(), "nothing is held at startup");
         assert_eq!(session.meshes.len(), MESH_COUNT);
         assert_eq!(session.meshes[0].path, "");
         assert_eq!(session.meshes[0].opacity, "1");
         assert_eq!(MESH_FRAME_NAMES[0], "Base");
+    }
+
+    // --- a held button is a jog on a clock ------------------------------------------
+    //
+    // The reference has no held-button mode; it is this port's addition. What it must not
+    // change is the step mode above, so the tests here lean on the same handlers and the same
+    // sentences, and add only the clock.
+
+    #[test]
+    fn one_second_of_hold_moves_one_step() {
+        // The rate *is* the step field: one step per second of holding.
+        let (mut held, mut document, mut angles) = session();
+        let before = tool_position(&document, &angles);
+        held.begin_jog(base(Axis::Y), 1, 10.0, &angles);
+        for now in [10.2, 10.4, 10.6, 10.8, 11.0] {
+            held.drive_jog(now, &mut document, &mut angles);
+        }
+        let after = tool_position(&document, &angles);
+        assert!(
+            (after[1] - before[1] - 1.0).abs() < 1e-9,
+            "{before:?} {after:?}"
+        );
+        assert!((after[0] - before[0]).abs() < 1e-9);
+        assert!((after[2] - before[2]).abs() < 1e-9);
+        assert_eq!(held.status, "Moved base Y +1");
+        assert!(held.jogging(), "the button is still down");
+
+        // A longer hold is proportionally further.
+        let (mut longer, mut document, mut angles) = session();
+        let before = tool_position(&document, &angles);
+        longer.jog_step = String::from("2.5");
+        longer.begin_jog(base(Axis::Y), 1, 0.0, &angles);
+        longer.drive_jog(0.4, &mut document, &mut angles);
+        let after = tool_position(&document, &angles);
+        assert!(
+            (after[1] - before[1] - 1.0).abs() < 1e-9,
+            "0.4 s at 2.5 steps/s is one step: {before:?} {after:?}"
+        );
+        assert_eq!(longer.status, "Moved base Y +1");
+    }
+
+    #[test]
+    fn every_frame_of_a_hold_asks_for_the_pose_one_late_frame_would() {
+        // The target pose is measured from the press, never from the previous frame, so the
+        // frames a hold is drawn at cannot bend where the arm belongs: an irregular sequence
+        // has to land exactly where a single drive at the same instant does. Branch selection
+        // follows the arm from frame to frame; here every frame stays on the branch the whole
+        // one-step move ends on, so even that agrees bit for bit.
+        let (mut irregular, mut document_a, mut angles_a) = session();
+        irregular.begin_jog(base(Axis::Y), 1, 0.0, &angles_a);
+        for now in [0.1, 0.13, 0.6, 1.0] {
+            irregular.drive_jog(now, &mut document_a, &mut angles_a);
+        }
+
+        let (mut single, mut document_b, mut angles_b) = session();
+        single.begin_jog(base(Axis::Y), 1, 0.0, &angles_b);
+        single.drive_jog(1.0, &mut document_b, &mut angles_b);
+
+        assert_eq!(
+            angles_a, angles_b,
+            "the path must not depend on the frames it was drawn at"
+        );
+        assert_eq!(irregular.status, single.status);
+    }
+
+    #[test]
+    fn a_hold_undoes_a_step_jog_made_during_it() {
+        // Every frame asks for the press's pose plus the elapsed time, so an edit to the arm
+        // mid-hold is overwritten by the next frame. That is what "the start point decides
+        // the direction" means once the arm has been moved underneath.
+        let (mut session, mut document, mut angles) = session();
+        let start = tool_pose_of(&document, &angles);
+        session.begin_jog(base(Axis::Y), 1, 0.0, &angles);
+        session.drive_jog(0.5, &mut document, &mut angles);
+
+        // Five degrees about the base Z axis, applied by a click.
+        session.jog(rotate_base(Axis::Z), 1, &mut document, &mut angles);
+
+        session.drive_jog(1.0, &mut document, &mut angles);
+        let pose = tool_pose_of(&document, &angles);
+        assert!(
+            (pose.p.y() - start.p.y() - 1.0).abs() < 1e-9,
+            "the tool is not one step along Y: {pose:?}"
+        );
+        assert!(
+            pose.r.frobenius_distance(start.r) < 1e-9,
+            "the rotation the click applied was not undone"
+        );
+        assert_eq!(session.status, "Moved base Y +1");
+    }
+
+    #[test]
+    fn a_one_second_hold_reports_the_same_sentence_as_one_click() {
+        // Both modes share `describe_jog`, and a second at rate `step` is one click's amount,
+        // so the sentences — and the configurations they leave — have to be identical.
+        let targets = [
+            base(Axis::X),
+            tool(Axis::Z),
+            rotate_base(Axis::Z),
+            rotate_tool(Axis::X),
+            joint(4),
+        ];
+        for target in targets {
+            for direction in [-1, 1] {
+                let (mut clicked, mut document_a, mut angles_a) = session();
+                clicked.jog(target, direction, &mut document_a, &mut angles_a);
+                let sentence = clicked.status.clone();
+
+                let (mut held, mut document_b, mut angles_b) = session();
+                held.begin_jog(target, direction, 3.0, &angles_b);
+                held.drive_jog(4.0, &mut document_b, &mut angles_b);
+
+                assert_eq!(
+                    held.status, sentence,
+                    "{target:?} direction {direction}: the two modes disagree about the report"
+                );
+                assert_eq!(
+                    angles_b, angles_a,
+                    "{target:?} direction {direction}: the two modes disagree about the move"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_release_timestamp_decides_where_the_hold_leaves_the_arm() {
+        let (mut session, mut document, mut angles) = session();
+        let before = tool_position(&document, &angles);
+        session.begin_jog(base(Axis::Y), 1, 0.0, &angles);
+        session.drive_jog(0.2, &mut document, &mut angles);
+        // The release lands between frames, and it is the release that decides.
+        session.release_jog(2.5, &mut document, &mut angles);
+
+        assert!(!session.jogging(), "the release ends the run");
+        let after = tool_position(&document, &angles);
+        assert!(
+            (after[1] - before[1] - 2.5).abs() < 1e-9,
+            "{before:?} {after:?}"
+        );
+        assert_eq!(session.status, "Moved base Y +2.5");
+
+        // A release with nothing in flight is a no-op — the panel calls it on every frame that
+        // saw nothing held.
+        session.release_jog(99.0, &mut document, &mut angles);
+        assert_eq!(tool_position(&document, &angles), after);
+        assert_eq!(session.status, "Moved base Y +2.5");
+    }
+
+    #[test]
+    fn a_hold_reads_its_rate_at_the_press_and_ignores_a_later_edit() {
+        // One sustained jog is one operation: a field edited mid-hold steers the next jog, the
+        // same rule that makes an unapplied DH edit wait for the next click.
+        let (mut session, mut document, mut angles) = session();
+        let before = tool_position(&document, &angles);
+        session.jog_step = String::from("2");
+        session.begin_jog(base(Axis::Y), 1, 0.0, &angles);
+
+        session.jog_step = String::from("10");
+        session.drive_jog(0.5, &mut document, &mut angles);
+        session.release_jog(1.0, &mut document, &mut angles);
+
+        let after = tool_position(&document, &angles);
+        assert!(
+            (after[1] - before[1] - 2.0).abs() < 1e-9,
+            "{before:?} {after:?}"
+        );
+        assert_eq!(session.status, "Moved base Y +2");
+    }
+
+    #[test]
+    fn a_joint_hold_adds_to_the_angle_it_started_from_and_keeps_the_winding() {
+        // A joint hold is `_jog_joint` on a clock: it accumulates and keeps its winding, so
+        // ten seconds at 40°/s from 400° is 800°, not 80°.
+        let (mut session, mut document, mut angles) = session();
+        angles[5] = 400.0;
+        session.sync_joint_angles(&angles);
+        session.joint_step = String::from("40");
+
+        session.begin_jog(joint(5), 1, 0.0, &angles);
+        session.drive_jog(5.0, &mut document, &mut angles);
+        session.release_jog(10.0, &mut document, &mut angles);
+
+        assert_eq!(angles[5], 800.0);
+        assert_eq!(session.status, "Jogged J6 +400 deg");
+    }
+
+    #[test]
+    fn a_hold_that_walks_out_of_reach_stops_at_the_last_pose_it_could_solve() {
+        let (mut session, mut document, mut angles) = session();
+        session.jog_step = String::from("1000");
+        session.begin_jog(base(Axis::Y), 1, 0.0, &angles);
+        session.drive_jog(0.001, &mut document, &mut angles);
+        let reachable = angles;
+
+        session.drive_jog(1.0, &mut document, &mut angles);
+        assert_eq!(session.status, NO_SOLUTION);
+        assert_eq!(
+            angles, reachable,
+            "the arm stays where the solver last answered"
+        );
+        assert!(
+            session.jogging(),
+            "the hold keeps measuring; reachability along a ray is not monotone"
+        );
+
+        session.release_jog(2.0, &mut document, &mut angles);
+        assert!(!session.jogging());
+        assert_eq!(angles, reachable);
+    }
+
+    #[test]
+    fn a_press_the_fields_refuse_leaves_no_hold_behind() {
+        // The press reads the same fields, in the same order, a click does, so the first
+        // complaint is the reference's — and a press it refuses starts no run.
+        let (mut session, _document, angles) = session();
+        session.jog_step = String::from("0");
+        session.begin_jog(base(Axis::Y), 1, 0.0, &angles);
+        assert_eq!(session.status, JOG_STEP_ERROR);
+        assert!(!session.jogging());
+        assert_eq!(angles, [0.0; JOINT_COUNT]);
+
+        // A mistyped DH field wins over the step, exactly as the click path orders them.
+        session.dh[4][0] = String::from("oops");
+        session.begin_jog(base(Axis::Y), 1, 0.0, &angles);
+        assert_eq!(session.status, "could not convert string to float: 'oops'");
+        assert!(!session.jogging());
+    }
+
+    #[test]
+    fn a_joint_hold_survives_a_table_the_pose_jogs_refuse() {
+        // `_jog_joint` never looks at the geometry, so a table with no first link still
+        // joint-jogs — and a hold must refuse exactly what a click refuses. Column 2 is `a`,
+        // and joint 2's is the first link length the planar solve divides by.
+        let (mut session, _document, angles) = session();
+        session.dh[1][2] = String::from("0");
+
+        session.begin_jog(base(Axis::Y), 1, 0.0, &angles);
+        assert!(!session.jogging(), "a pose hold needs the geometry");
+        assert!(!session.status.is_empty(), "and says why");
+
+        session.begin_jog(joint(0), 1, 0.0, &angles);
+        assert!(session.jogging(), "a joint hold does not");
+    }
+
+    #[test]
+    fn a_repeated_press_does_not_restart_the_hold() {
+        // The panel calls `begin_jog` on every frame the button is down; only the first may
+        // set the start time, or the elapsed time would never grow.
+        let (mut session, mut document, mut angles) = session();
+        let before = tool_position(&document, &angles);
+        for now in [0.0, 0.25, 0.5, 0.75] {
+            session.begin_jog(base(Axis::Y), 1, now, &angles);
+            session.drive_jog(now, &mut document, &mut angles);
+        }
+        let moved = tool_position(&document, &angles);
+        assert!(
+            (moved[1] - before[1] - 0.75).abs() < 1e-9,
+            "expected 0.75 steps: {before:?} {moved:?}"
+        );
+        assert_eq!(session.status, "Moved base Y +0.75");
+    }
+
+    #[test]
+    fn the_press_frame_itself_moves_nothing_and_says_nothing() {
+        let (mut session, mut document, mut angles) = session();
+        let before = angles;
+        let status = session.status.clone();
+        session.begin_jog(base(Axis::Y), 1, 7.5, &angles);
+        session.drive_jog(7.5, &mut document, &mut angles);
+
+        assert_eq!(angles, before, "elapsed is zero at the press");
+        assert_eq!(session.status, status, "and it says nothing");
+        assert_eq!(
+            session.joint_angles[0], "0",
+            "the fields were not rewritten"
+        );
+    }
+
+    /// A held jog has to pass through the same branches a sequence of clicks does, so it
+    /// winds the joints the same way. This is the issue's own pose — J5 = 45°, everything
+    /// else zero — where 400 one-degree base Rz+ clicks leave J6 more than a whole turn
+    /// backwards, the winding the readout annotates as `idx -1`. Measuring every frame's
+    /// branch from the press-time angles instead places each frame's answer beside the
+    /// J6 = 0 the hold started from, so the hold lands inside a single turn and the index
+    /// never appears — the bug this test exists for. (The jog goes past a full turn because
+    /// the annotation gate is the magnitude: exactly 360 is a rounding either side of the
+    /// boundary.)
+    ///
+    /// The hold is driven at 10 frames a second, a tenth of the rate field's one-step-per-
+    /// second, and the comparison is against clicks of the same total. The two paths need
+    /// not agree to the last bit — a frame's target is measured from the press and a
+    /// click's from the previous click — so the assertion is the winding and the joint
+    /// angles at solver tolerance, not `==`.
+    #[test]
+    fn a_held_jog_winds_the_joints_the_way_the_equivalent_clicks_do() {
+        const START: [f64; JOINT_COUNT] = [0.0, 0.0, 0.0, 0.0, 45.0, 0.0];
+
+        let (mut clicked, mut document_a, _) = session();
+        clicked.rotation_step = String::from("1");
+        let mut angles_a = START;
+        clicked.sync_joint_angles(&angles_a);
+        for _ in 0..400 {
+            clicked.jog(rotate_base(Axis::Z), 1, &mut document_a, &mut angles_a);
+        }
+
+        let (mut held, mut document_b, _) = session();
+        held.rotation_step = String::from("1");
+        let mut angles_b = START;
+        held.sync_joint_angles(&angles_b);
+        held.begin_jog(rotate_base(Axis::Z), 1, 0.0, &angles_b);
+        for frame in 1..=4000 {
+            held.drive_jog(f64::from(frame) / 10.0, &mut document_b, &mut angles_b);
+        }
+
+        // J6 is the joint the issue names: more than one whole turn backwards, annotated
+        // as `idx -1`, in both modes. The residual is whatever the path leaves beside the
+        // turn, so the assertions are the turn count and the annotation, not the residual.
+        let clicked_turns = wound_turns(angles_a[5]).expect("a wound joint is annotated");
+        let held_turns = wound_turns(angles_b[5]).expect("a wound joint is annotated");
+        assert_eq!(
+            clicked_turns.0, -1,
+            "the clicks left J6 at {} degrees",
+            angles_a[5]
+        );
+        assert!(
+            angles_a[5] < -360.0,
+            "the clicks left J6 at {}, inside a single turn",
+            angles_a[5]
+        );
+        assert_eq!(
+            held_turns.0, clicked_turns.0,
+            "the hold left J6 at {} degrees; the clicks left it at {}",
+            angles_b[5], angles_a[5]
+        );
+        assert!(
+            front_readout(angles_b[5]).ends_with("idx -1"),
+            "the hold's readout is {:?}, without the index the clicks earned",
+            front_readout(angles_b[5])
+        );
+
+        // And the two modes agree on the whole configuration, not just the annotated
+        // joint: same branch, same winding, same place on it.
+        for joint in 0..JOINT_COUNT {
+            assert!(
+                (angles_b[joint] - angles_a[joint]).abs() < 1e-6,
+                "J{} is {} after the hold and {} after the clicks",
+                joint + 1,
+                angles_b[joint],
+                angles_a[joint]
+            );
+        }
+
+        // Both end at the same pose — the press pose turned 400 degrees — which is what
+        // makes the winding a choice of index rather than a different arm.
+        let clicked_pose = tool_pose_of(&document_a, &angles_a);
+        let held_pose = tool_pose_of(&document_b, &angles_b);
+        assert!(
+            held_pose.p.distance(clicked_pose.p) < 1e-9
+                && held_pose.r.frobenius_distance(clicked_pose.r) < 1e-9,
+            "the two modes did not end at the same pose"
+        );
     }
 
     /// The applied table's tool pose, through the crate's own forward kinematics.

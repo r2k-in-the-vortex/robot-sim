@@ -17,12 +17,11 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, egui};
 use robot_kinematics::{JOINT_COUNT, Pose};
-use robot_model::Document;
 use robot_model::{AXIS_FRAME_NAMES, FRAME_COUNT, MESH_FRAME_NAMES};
 
 use crate::camera::OrbitCamera;
 use crate::dialogs;
-use crate::jog::Axis;
+use crate::jog::{Axis, JogFrame, JogMode, JogTarget};
 use crate::motion::MotionRuntime;
 use crate::motion_ui;
 use crate::scene::{GIZMO_LENGTH_FRACTION, LABEL_COLOR, LABEL_LIFT_FRACTION, LinkMeshes};
@@ -89,6 +88,11 @@ pub fn draw_shell(
     mut viewport: ResMut<Viewport>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
+    // The clock the held-button mode measures against. bevy_egui hands egui the frame's
+    // `Time<Real>` seconds, so this is the same number every frame and the same number a
+    // `Time` system would read — read once here so the press and the release of one frame
+    // cannot disagree about when "now" is.
+    let now = ctx.input(|input| input.time);
     if ctx.theme() == egui::Theme::Dark {
         // The reference is a light UI (`simulator.py:190` paints the figure #f4f6f7), and
         // egui follows the system theme by default. Setting the preference is enough: the
@@ -125,15 +129,18 @@ pub fn draw_shell(
     // panel would put the render under the widgets.
     let mut central = egui::Rect::from_min_max(egui::pos2(screen.min.x, strip.max.y), screen.max);
 
+    // Whether any jog button is being held this frame. Only the View tab's panel can report
+    // one, so the value the other arm leaves behind is what ends a run that outlived its tab.
+    let mut jogging = false;
     match *tab {
         Tab::View => {
             let controls = egui::Panel::left("view_controls")
                 .default_size(240.0)
                 .show(&mut root, |ui| {
-                    view_controls(ui, &mut view, &mut robot, &mut session, motion.active)
-                })
-                .response
-                .rect;
+                    view_controls(ui, &mut view, &mut robot, &mut session, motion.active, now)
+                });
+            jogging = controls.inner;
+            let controls = controls.response.rect;
             let readout = egui::Panel::bottom("pose_readout")
                 .show(&mut root, |ui| {
                     pose_readout(ui, &robot, &link_meshes, &mut session)
@@ -212,6 +219,20 @@ pub fn draw_shell(
         }
     }
 
+    // A continuous jog lives exactly as long as the button that reports it being held, and
+    // only the View tab draws those. On every other frame — the Parameters tab, a radio
+    // switch out of Continuous, or the release itself — nothing is held, so the run ends at
+    // `now` instead of measuring a button nobody can see.
+    if session.jogging() {
+        // Through one `DerefMut`: a `ResMut` cannot hand out two of its fields at once.
+        let robot = &mut *robot;
+        if jogging {
+            session.drive_jog(now, &mut robot.document, &mut robot.runtime_angles_deg);
+        } else {
+            session.release_jog(now, &mut robot.document, &mut robot.runtime_angles_deg);
+        }
+    }
+
     // The messagebox the reference raises inside its handlers (`simulator.py:673, 708, 821`).
     draw_notice(&mut root, &mut session);
 
@@ -264,13 +285,19 @@ fn physical_viewport(points: egui::Rect, scale: f32, target: UVec2) -> (UVec2, U
 /// interaction *and* a different failure model: it cannot hold `"abc"`, so the reference's
 /// own complaints — "Joint step must be a finite positive angle." — would become unreachable.
 /// Keeping the fields as text keeps the validation the port is supposed to reproduce.
+///
+/// # What it returns
+///
+/// Whether any jog button is being held this frame. That is what keeps a continuous jog alive:
+/// [`draw_shell`] drives the run while it is true and ends it when it is not.
 fn view_controls(
     ui: &mut egui::Ui,
     view: &mut ViewState,
     robot: &mut RobotState,
     session: &mut Session,
     motion_active: bool,
-) {
+    now: f64,
+) -> bool {
     ui.add_space(4.0);
     ui.heading("View");
     ui.label("Left-drag orbits, right-drag pans, the wheel zooms.");
@@ -302,78 +329,43 @@ fn view_controls(
         });
     ui.add_space(6.0);
 
-    // `simulator.py:251-256`'s two frame groups, in its order. A motion owns the runtime
-    // angles while it is active, so every pose writer is disabled beside the note above.
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.add_enabled_ui(!motion_active, |ui| {
-            frame_jog_buttons(
-                ui,
-                "Base frame",
-                session,
-                robot,
-                Session::jog_cartesian,
-                Session::jog_rotation_world,
-            );
-        });
+    ui.horizontal(|ui| {
+        ui.label("Jog mode");
+        ui.radio_value(&mut session.jog_mode, JogMode::Step, "Step");
+        ui.radio_value(&mut session.jog_mode, JogMode::Continuous, "Continuous");
     });
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.add_enabled_ui(!motion_active, |ui| {
-            frame_jog_buttons(
-                ui,
-                "Tool frame",
-                session,
-                robot,
-                Session::jog_tool_translation,
-                Session::jog_rotation_tool,
-            );
-        });
-    });
+    if session.jog_mode == JogMode::Continuous {
+        // Nothing else on the panel says that the step boxes have become rates.
+        ui.label(egui::RichText::new("One step per second held.").small());
+    }
     ui.add_space(6.0);
 
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.add_enabled_ui(!motion_active, |ui| {
-            ui.label(egui::RichText::new("Joint jogs").strong());
-            ui.horizontal(|ui| {
-                ui.label("Joint step");
-                step_field(ui, &mut session.joint_step);
-                ui.separator();
-                for joint in 0..JOINT_COUNT {
-                    ui.vertical(|ui| {
-                        ui.label(format!("J{}", joint + 1));
-                        ui.horizontal(|ui| {
-                            if ui.small_button("-").clicked() {
-                                session.jog_joint(
-                                    joint,
-                                    -1,
-                                    &mut robot.document,
-                                    &mut robot.runtime_angles_deg,
-                                );
-                            }
-                            if ui.small_button("+").clicked() {
-                                session.jog_joint(
-                                    joint,
-                                    1,
-                                    &mut robot.document,
-                                    &mut robot.runtime_angles_deg,
-                                );
-                            }
-                        });
-                        // `_sync_joint_angle_views`'s front readout (`simulator.py:325`), plus the
-                        // winding annotation once the joint has wound a whole turn.
-                        ui.label(
-                            egui::RichText::new(session::front_readout(
-                                robot.runtime_angles_deg[joint],
-                            ))
-                            .small(),
-                        );
-                    });
-                }
-            });
-        });
+    // `simulator.py:251-256`'s two frame groups, in its order, then the joint rows. A motion
+    // owns the runtime angles while it is active, so every pose writer is disabled beside the
+    // note above.
+    let mut held = false;
+    ui.add_enabled_ui(!motion_active, |ui| {
+        held |= egui::Frame::group(ui.style())
+            .show(ui, |ui| {
+                frame_jog_buttons(ui, "Base frame", session, robot, JogFrame::Base, now)
+            })
+            .inner;
+        held |= egui::Frame::group(ui.style())
+            .show(ui, |ui| {
+                frame_jog_buttons(ui, "Tool frame", session, robot, JogFrame::Tool, now)
+            })
+            .inner;
+        ui.add_space(6.0);
+
+        held |= egui::Frame::group(ui.style())
+            .show(ui, |ui| joint_jog_buttons(ui, session, robot, now))
+            .inner;
     });
 
     ui.add_space(4.0);
     ui.label(session.status.as_str());
+
+    held
 }
 
 /// One step box, sized like the reference's `width=6` spinboxes.
@@ -386,45 +378,146 @@ fn step_field(ui: &mut egui::Ui, text: &mut String) {
 ///
 /// The reference's column arithmetic — `axis * 2 + (1 if direction > 0 else 0)` over
 /// `((-1, "-"), (1, "+"))` — is a grid layout; the order it produces is what matters here,
-/// so the row reads X−, X+, Y−, Y+, Z−, Z+.
+/// so the row reads X−, X+, Y−, Y+, Z−, Z+. Returns whether any of the twelve is held.
 fn frame_jog_buttons(
     ui: &mut egui::Ui,
     title: &str,
     session: &mut Session,
     robot: &mut RobotState,
-    translate: fn(&mut Session, Axis, i32, &mut Document, &mut [f64; JOINT_COUNT]),
-    rotate: fn(&mut Session, Axis, i32, &mut Document, &mut [f64; JOINT_COUNT]),
-) {
+    frame: JogFrame,
+    now: f64,
+) -> bool {
     ui.label(egui::RichText::new(title).strong());
+    let mut held = false;
     // The translation row first, then the rotation one, which is the reference's row order.
     for rotating in [false, true] {
         ui.horizontal(|ui| {
             for axis in Axis::ALL {
                 for direction in [-1, 1] {
                     let label = jog_button_label(axis, direction, rotating);
-                    if ui.small_button(label).clicked() {
-                        if rotating {
-                            rotate(
-                                session,
-                                axis,
-                                direction,
-                                &mut robot.document,
-                                &mut robot.runtime_angles_deg,
-                            );
-                        } else {
-                            translate(
-                                session,
-                                axis,
-                                direction,
-                                &mut robot.document,
-                                &mut robot.runtime_angles_deg,
-                            );
-                        }
-                    }
+                    held |= jog_button_response(
+                        ui,
+                        session,
+                        robot,
+                        JogTarget::cartesian(frame, rotating, axis),
+                        direction,
+                        label,
+                        now,
+                    );
                 }
             }
         });
     }
+    held
+}
+
+/// The six per-joint `-`/`+` pairs, `_jog_joint`'s buttons (`simulator.py:327-341`), with the
+/// front readout `_sync_joint_angle_views` writes under each. Returns whether any is held.
+fn joint_jog_buttons(
+    ui: &mut egui::Ui,
+    session: &mut Session,
+    robot: &mut RobotState,
+    now: f64,
+) -> bool {
+    let mut held = false;
+    ui.label(egui::RichText::new("Joint jogs").strong());
+    ui.horizontal(|ui| {
+        ui.label("Joint step");
+        step_field(ui, &mut session.joint_step);
+        ui.separator();
+        for joint in 0..JOINT_COUNT {
+            ui.vertical(|ui| {
+                ui.label(format!("J{}", joint + 1));
+                ui.horizontal(|ui| {
+                    for (label, direction) in [("-", -1), ("+", 1)] {
+                        held |= jog_button_response(
+                            ui,
+                            session,
+                            robot,
+                            JogTarget::Joint(joint),
+                            direction,
+                            String::from(label),
+                            now,
+                        );
+                    }
+                });
+                // `_sync_joint_angle_views`'s front readout (`simulator.py:325`), plus the
+                // winding annotation once the joint has wound a whole turn.
+                ui.label(
+                    egui::RichText::new(session::front_readout(robot.runtime_angles_deg[joint]))
+                        .small(),
+                );
+            });
+        }
+    });
+    held
+}
+
+/// Draw one jog button and act on it; returns whether it is being held this frame.
+///
+/// The mode decides what a **press** starts, not whether a hold is reported. A run that began
+/// in Continuous therefore keeps going if the radio is switched mid-hold and ends only when
+/// the button is; a press made in Step mode can never start one.
+fn jog_button_response(
+    ui: &mut egui::Ui,
+    session: &mut Session,
+    robot: &mut RobotState,
+    target: JogTarget,
+    direction: i32,
+    label: String,
+    now: f64,
+) -> bool {
+    let response = ui.add(jog_button(label));
+    let held = held_down(&response, ui);
+    match session.jog_mode {
+        JogMode::Step => {
+            if response.clicked() {
+                session.jog(
+                    target,
+                    direction,
+                    &mut robot.document,
+                    &mut robot.runtime_angles_deg,
+                );
+            }
+        }
+        JogMode::Continuous => {
+            // Idempotent: the press frame freezes the run, every later frame refreshes it.
+            if held {
+                session.begin_jog(target, direction, now, &robot.runtime_angles_deg);
+            }
+        }
+    }
+    held
+}
+
+/// One jog button: small, and sensing **drags** as well as clicks.
+///
+/// The drag sense is load-bearing, not decoration. [`egui::Response::is_pointer_button_down_on`]
+/// is `potential_click_id == us || potential_drag_id == us`, and egui drops
+/// `potential_click_id` once the press is older than `InputOptions::max_click_duration` — 0.8
+/// seconds by default — because a press that long can no longer become a click. A click-only
+/// button therefore reports "down" for only the first 0.8 s of a hold, and a jog would silently
+/// stop mid-move. `Sense::click_and_drag` puts the widget in the hit test's drag set, whose id
+/// is cleared only at the release, so a hold is reported for as long as it lasts. Quick clicks
+/// are unaffected.
+fn jog_button(label: String) -> egui::Button<'static> {
+    egui::Button::new(label)
+        .small()
+        .sense(egui::Sense::click_and_drag())
+}
+
+/// Whether the pointer is holding this widget down with the primary button, in a window the
+/// user is actually looking at.
+///
+/// `is_pointer_button_down_on` is true from the press frame with no click-versus-drag decision
+/// window, and stays true while the pointer drags off the button — which is what makes a hold
+/// on an eight-point `-` button usable. It is set for a press of any pointer button, so the
+/// primary button is checked separately; and an unfocused window still reports the pointer as
+/// down, so the focus is checked too, because a hold must not keep moving the arm while the
+/// user is elsewhere.
+fn held_down(response: &egui::Response, ui: &egui::Ui) -> bool {
+    response.is_pointer_button_down_on()
+        && ui.input(|input| input.pointer.primary_down() && input.focused)
 }
 
 /// One jog button's label: the axis letter, an `R` when the button turns the pose rather
@@ -1160,6 +1253,25 @@ mod tests {
     /// The ways to get this wrong are a suffix taken from the other branch of the sign test,
     /// a letter taken from the other axis, and an `R` on the row that moves the tool rather
     /// than turning it — the panel's two nested loops put all three next to each other.
+    /// The drag sense is what lets a hold outlive egui's click window.
+    ///
+    /// `is_pointer_button_down_on` is `potential_click_id == us || potential_drag_id == us`,
+    /// and egui drops `potential_click_id` once the press is older than
+    /// `InputOptions::max_click_duration`. A click-only jog button would therefore report
+    /// "down" for 0.8 s and then stop, silently ending the jog mid-move. This pins the sense
+    /// the widget is built with so nobody "simplifies" it back to a plain `small_button`.
+    #[test]
+    fn a_jog_button_senses_drags_so_a_hold_outlives_the_click_window() {
+        egui::__run_test_ui(|ui| {
+            let response = ui.add(jog_button(String::from("X+")));
+            assert!(response.sense.senses_click(), "a click must still step");
+            assert!(
+                response.sense.senses_drag(),
+                "a hold must be reported past the click window"
+            );
+        });
+    }
+
     #[test]
     fn a_jog_button_is_labelled_with_the_axis_and_direction_it_carries() {
         let rows = [
