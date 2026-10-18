@@ -235,6 +235,7 @@ the exact goldens compare with `==`.
 | `Motion.synchronize` | `synchronize` | `golden_motion.rs` sync cases (exact `Ratio`) |
 | `Motion.movejScalar` | `plan_movej_scalar` | `tests/sync.rs` |
 | — (the same composition with the M1-opt scalar profile; app-facing) | `plan_movej_scalar_optimal` | `tests/sync.rs` |
+| `Motion.IsRotation`, `Motion.LinearPath`, `Motion.LinCommand`, `Motion.SampledTrajectory`, `Motion.SampledSolutions`, `Motion.LinPlan`, `Motion.HasLinPlan` | — (no Rust `lin` mode yet) | — (definitions only; no theorem) |
 | `Motion.stall_error_grows` / `stall_error_crosses` | supervisor plant test | `tests/supervisor.rs` (the Rust side is a simulation; only the kinematic growth is a theorem) |
 
 ### Theorem map
@@ -295,6 +296,11 @@ template's duration floor is about four seconds for any non-zero move.
 is a headless simulation tested in `tests/supervisor.rs`, not a theorem. The M5 Cartesian
 certifier remains a conditional construction: `Motion.comp_bounds` is proved, but the
 sampled path-derivative bounds and `cartesian_path_feasible` are not implemented in Lean.
+`Motion.Linear` is the §5.6 `lin` vocabulary, not the M5 certifier. It defines
+`IsRotation`, `LinearPath`, `LinCommand`, `SampledTrajectory`, `SampledSolutions`,
+`SamplesAreSolutions`, `SamplesOnPath`, `BranchContinuous`, `WithinSampledLimits`,
+`LinPlan` and the existential definition `HasLinPlan`. The module has no theorem and no
+Rust counterpart: it states what a sampled plan must satisfy, not that one exists.
 
 **M1-opt (staged).** The Rust `plan_rest_to_rest` (Cases A/A′/B/C, with `sqrt`/`cbrt`)
 is implemented and golden-tested with the declared tolerance. The Lean proofs of the

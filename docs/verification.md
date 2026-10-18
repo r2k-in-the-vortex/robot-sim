@@ -231,10 +231,20 @@ physical robot; the kinematic error growth under a position clamp and a monotone
 is proved in `Motion.Supervisor` (`stall_error_grows` and the finite-time crossing
 corollary), but the saturation-dependent stall decision remains a simulation property.
 
+The `lin` (Cartesian straight-line) mode has a Lean vocabulary but no Lean theorem.
+`Motion.Linear` defines `LinearPath`, `LinCommand`, `SampledTrajectory`,
+`SampledSolutions`, the four sampled checks (`SamplesAreSolutions`, `SamplesOnPath`,
+`BranchContinuous`, `WithinSampledLimits`) and `LinPlan`/`HasLinPlan`. `HasLinPlan` is a
+definition; nothing asserts it for a command. The feasibility decision is numerical and
+sampled — IK each sample, branch/winding step checks, finite-difference V/A/J bounds — and
+it bounds only the sampled sequence, not continuous time. M5's `cartesian_path_feasible`
+remains the separate conditional certificate and is not claimed here.
+
 What is deliberately not attempted: arm dynamics and torque limits (the repository has no
 mass matrix or torque model), true time-optimal path parameterization, position-limit
 enforcement in the planner, and a tracking-error bound for `f64`. The M5 Cartesian mode is a
 conditional feasibility certificate whose path derivative bounds are sampled, not proved.
+`Motion.Linear` does not narrow that gap.
 
 ## Summary
 

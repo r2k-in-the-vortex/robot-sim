@@ -1167,6 +1167,8 @@ lean/
     Sync.lean                  -- IsRest, syncTime, hold, stretchTo, synchronize,
                                --   synchronizedStop
     MoveJ.lean                 -- movejScalar
+    Linear.lean                -- lin: LinearPath, LinCommand, SampledTrajectory,
+                               --   sampled check predicates (definitions only)
     Supervisor.lean            -- stall_error_grows, stall_error_crosses
   MotionTestData.lean          -- generator (lean_exe, outside defaultTargets)
 ```
@@ -1175,6 +1177,8 @@ The M1-opt files (`Plan.lean`, `Plan/Common.lean`, `Plan/Full.lean`, `Plan/NoCru
 `Plan/Triangular.lean`) and the M5 `Cartesian.lean` are staged, not present: the Rust
 optimal planner is implemented and golden-tested, and `comp_bounds` is proved here, but
 the radical-case Lean proofs and the sampled Cartesian certificate are future work (§4.8).
+`Linear.lean` is present and is not that staged M5 certifier: it defines only the sampled
+`lin` vocabulary of §5.6, with no existence or feasibility theorem.
 
 Each file follows the repository's Lean module convention (`module`, `public import`,
 `@[expose] public section`) exactly as `Kinematics.lean` does. Without `@[expose]`, the
@@ -1273,6 +1277,7 @@ and the CI no-`sorry`/`axiom` grep over `Motion/` and `Motion.lean` passes.
 | `General` | `stopFeasible`, `viable`, the Rust-mirroring `stopProfile`/`startProfile`, `planGeneral`, and its boundary/feasibility/`isSome`/length theorems |
 | `Sync` | `IsRest`, `hold`, `syncTime`, `stretchTo`, `JointProfile`, `synchronize`, the M3 theorem table, and the synchronised-stop construction |
 | `MoveJ` | scalar MoveJ with effective limits, path/boundary/feasibility theorems |
+| `Linear` | the §5.6 `lin` specification: `LinearPath`, `LinCommand`, `SampledTrajectory`, `SampledSolutions` and the sampled check predicates; definitions only, no existence or feasibility theorem |
 | `Supervisor` | `stall_error_grows` and the finite-time crossing corollary |
 | `Compose` | `comp_bounds` and `comp_bounds_on_feasible` |
 
@@ -1287,6 +1292,8 @@ Deliberately staged or out of scope, with the gap named in `docs/lean-rust-map.m
 - `stopFeasible_necessary` (the arbitrary-profile necessity direction of M2); the
   constructive contract and the exact `planGeneral_isSome_iff` are proved.
 - The M5 Cartesian certifier; `comp_bounds` is proved, the sampled path bounds are not.
+- The Rust `lin` mode and any Lean theorem about it. `Motion.Linear` is vocabulary only;
+  the numerical sampled check is future work, as is the M5 certifier.
 - Full supervisor stall soundness (including command saturation), which remains a
   simulation property in M4; only the kinematic error-growth lemma is a theorem.
 
@@ -1717,13 +1724,21 @@ The app's Motion tab (issue #13) implements the first command type, `movej`, on 
   queue on the left, with joint-angle, tool-XYZ and unwrapped-RPY graphs in a bottom
   panel. The graphs show the whole plan and a cursor at the playback time.
 
-**Planned command types.** The other three are specified here but not implemented. They
-need a sampled-trajectory segment beside the analytic `JointProfile`s:
+**Planned command types.** These are specified here but not implemented in Rust. They need
+a sampled-trajectory segment beside the analytic `JointProfile`s:
 
 - `lin`: interpolate the tool pose linearly in position and with a rotation interpolation
   (slerp or axis-angle) in Cartesian space, sample at a fixed rate, and solve each sample
   with the existing closed-form IK. Reject a path with an unreachable sample or a branch
-  discontinuity. Joint limits are checked on the sampled joint trajectory.
+  discontinuity. Joint limits are checked on the sampled joint trajectory. The Lean
+  formulation is `lean/Motion/Linear.lean` (definitions only): `IsRotation`, `LinearPath`
+  (affine position plus a supplied rotation path), `LinCommand`, `SampledTrajectory`,
+  `SampledSolutions`, and the checks `SamplesAreSolutions`, `SamplesOnPath`,
+  `BranchContinuous`, `WithinSampledLimits`, `LinPlan`, plus the existential definition
+  `HasLinPlan`. The module states no theorem: the feasibility decision is the numerical,
+  sampled check above, no plan is asserted to exist, and M5's `cartesian_path_feasible`
+  certifier remains future work. The slerp-vs-axis-angle choice stays supplied data,
+  matching this section.
 - `circle`/`ellipse`: a center, plane normal, two radii, start/end angle and direction
   define the arc; sample the Cartesian path and solve it the same way. An ellipse segment
   needs a parameterization decision (arc-length vs. angle) before the schema is fixed.
@@ -2085,6 +2100,7 @@ M1, M2 and M3 are the core. M4 makes the controller usable. M5/M6 are follow-ups
 | L08 | Sync | `lean/Motion/Sync.lean` | L01 | M3 sync theorem table |
 | L09 | Scalar MoveJ | `lean/Motion/MoveJ.lean` | L02b, L02 | `movejScalar_*` |
 | L10 | Cartesian (optional) | `lean/Motion/Cartesian.lean` | L07 | Conditional certificate theorem |
+| L11 | `lin` sampled specification (definitions only) | `lean/Motion/Linear.lean` | L09, IK modules | `lake build`; no theorem declarations; docs boundary; no Rust counterpart yet |
 | R01 | Profile, eval, transforms (Field-generic) | `crates/robot-motion/src/profile.rs` | T00 | unit tests; boundary convention; `Profile<Ratio>` eval |
 | R02a | Conservative planner (M1-default) | `src/conservative.rs` | R01 | exact `Ratio` output; matches golden; property tests |
 | R02 | Optimal planner (M1-opt) | `src/plan.rs` | R01 | matches optimal golden with tolerance; property tests |
