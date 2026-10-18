@@ -305,9 +305,14 @@ states what a sampled plan must satisfy, not that one exists.
 The Rust counterpart is `robot_motion::linear`. `LinearPath` supplies slerp as the
 `rotation` function (the Lean structure's supplied-data slot), `LinearSample` carries the
 placed total angles and shoulder/elbow labels, `SampledTrajectory` is the uniform sampled
-view with the same `k/(count-1)` parameter law and forward finite differences,
-`solve_sample` is the numerical `SamplesAreSolutions`/`SamplesOnPath` step, and
+view with the same `k/(count-1)` parameter law and forward finite differences, and
 `check_branch_continuous` / `check_within_sampled_limits` are the two sampled predicates.
+`solve_sample` is the numerical `SamplesAreSolutions`/`SamplesOnPath` step, but it uses the
+application's tolerance-widened [`robot_kinematics::solve`] (`Tolerances::python()`) rather
+than the exact `solutions`: the app's RPY command boundary can perturb a singular pose by
+an ulp, and the unfiltered exact candidates then jump between wrist splits. Every returned
+candidate is still required to reproduce the sampled pose within `POSE_TOLERANCE`, so the
+predicate is enforced numerically rather than as exact membership in `solutions`.
 The module additionally offers `certify_linear_path` + `sample_linear_certificate`, the
 application's rest-to-rest time law. Those two are a **numerical** extension: the M1/M2/M3
 path-derivative bounds are finite differences over a sample grid, not the hypotheses of

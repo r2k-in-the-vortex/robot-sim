@@ -392,6 +392,23 @@ mod tests {
     }
 
     #[test]
+    fn a_line_from_the_rpy_rounded_zero_pose_can_be_planned() {
+        // The command boundary stores RPY, so the shipped zero pose is round-tripped
+        // through the gimbal-lock representative before planning. The exact solver sees a
+        // pose an ulp off the singularity and jumps between wrist splits; the
+        // tolerance-widened solver keeps the continuous branch, which is what makes the
+        // default MoveL editor usable for a pure X move.
+        use crate::motion::CommandPose;
+        let parameters = parameters();
+        let rounded = CommandPose::from_pose(&zero_pose(&parameters)).to_pose();
+        let mut stop = rounded;
+        stop.p = stop.p + Vec3::new(4.0, 0.0, 0.0);
+        let plan = plan(&parameters, &rounded, &stop, &[0.0; JOINT_COUNT], &limits())
+            .expect("the tolerance-widened solver finds a continuous branch");
+        assert!(plan.total_time() > 0.0);
+    }
+
+    #[test]
     fn a_line_leaving_the_wrist_singularity_is_refused_with_a_hint() {
         // The shipped zero pose has joint 5 at zero. The IK has no continuous branch off
         // the singularity, so the first sample step is large; the message says what to do.

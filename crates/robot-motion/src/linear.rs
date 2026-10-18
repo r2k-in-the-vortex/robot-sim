@@ -16,9 +16,9 @@
 //! * [`check_branch_continuous`] and [`check_within_sampled_limits`] are
 //!   `BranchContinuous` and `WithinSampledLimits`.
 //! * [`solve_sample`] is the per-sample `SamplesAreSolutions` / `SamplesOnPath` step:
-//!   take the closed form's candidates, keep those whose forward kinematics reproduces
-//!   the sampled pose, and choose the one nearest the previous configuration in the
-//!   wrapped metric.
+//!   take the closed form's candidates through the application's tolerance-widened
+//!   solver, keep those whose forward kinematics reproduces the sampled pose, and choose
+//!   the one nearest the previous configuration in the wrapped metric.
 //!
 //! # The numerical planner
 //!
@@ -59,7 +59,7 @@
 //! real-time control loop.
 
 use robot_kinematics::{
-    Geometry, JOINT_COUNT, Mat3, Pose, Scalar, Solution, SolutionSet, Vec3, fk, solutions,
+    Geometry, JOINT_COUNT, Mat3, Pose, Scalar, Solution, SolutionSet, Tolerances, Vec3, fk, solve,
     units::wrap_angle,
 };
 
@@ -489,11 +489,14 @@ where
 /// Solve one sampled pose with the closed form and place the chosen candidate beside
 /// `reference`.
 ///
-/// This is the numerical form of `SamplesAreSolutions` and `SamplesOnPath` together:
-/// every returned sample comes from [`robot_kinematics::solutions`], and its forward
-/// kinematics is required to reproduce `target` within [`POSE_TOLERANCE`]. Candidates
-/// that fail the re-check (possible near the wrist singularity, where the read-back is
-/// noise-driven) are discarded, and the nearest surviving candidate is placed with
+/// This is the numerical form of `SamplesAreSolutions` and `SamplesOnPath` together.
+/// Every candidate comes from [`robot_kinematics::solve`] with `Tolerances::python()` —
+/// the same tolerance-widened solver the pose jogs use. That matters at a wrist
+/// singularity: a command pose that has been through the RPY boundary can differ from the
+/// exact configuration by an ulp, and the unfiltered exact [`robot_kinematics::solutions`]
+/// candidates can then jump between wrist splits while `solve`'s pose filter keeps the
+/// continuous flat split. The candidates that survive are re-checked against `target`
+/// within [`POSE_TOLERANCE`] (Lean's `SamplesOnPath`), and the nearest one is placed with
 /// [`Solution::representative_near`], which preserves winding. An empty candidate set is
 /// [`LinearError::UnreachableSample`]; a non-empty set with no survivor is
 /// [`LinearError::SamplesOnPath`].
@@ -506,7 +509,7 @@ pub fn solve_sample(
         return Err(LinearError::NonFiniteInput);
     }
     let mut candidates = SolutionSet::<f64>::new();
-    solutions(geometry, target, &mut candidates);
+    solve(geometry, target, &Tolerances::python(), &mut candidates);
     if candidates.is_empty() {
         return Err(LinearError::UnreachableSample { sample: 0 });
     }
@@ -588,6 +591,21 @@ pub fn certify_linear_path(
         !limit.vmax().is_finite() || !limit.amax().is_finite() || !limit.jmax().is_finite()
     }) {
         return Err(LinearError::NonFiniteInput);
+    }
+
+    // An exactly stationary path is a zero-duration move, not a dense sampling of a
+    // point. Solving it sample by sample near a wrist singularity can turn ulp-sized
+    // quaternion differences into a large wrist split; the endpoints say there is no
+    // motion, so resolve the start once and stop.
+    if path.start() == path.stop() {
+        let start = solve_sample(geometry, &path.pose(0.0), reference)
+            .map_err(|error| at_sample(error, 0))?;
+        return Ok(LinearCertificate {
+            profile: Profile::constant(State::new(0.0, 0.0, 0.0)),
+            start,
+            limits: *limits,
+            max_step,
+        });
     }
 
     // The uniform-parameter solve. The first sample is the reference's nearest candidate;
@@ -819,6 +837,13 @@ pub fn slerp_rotation(start: &Pose<f64>, stop: &Pose<f64>, s: f64) -> Mat3<f64> 
     }
     if s >= 1.0 {
         return stop.r;
+    }
+    // Identical rotations interpolate to themselves. Without this, the quaternion
+    // round trip below changes the matrix by an ulp or two; near a wrist singularity that
+    // is enough to make the IK read-back jump between wrist splits, which turns a stationary
+    // path into a fictitious long move.
+    if start.r == stop.r {
+        return start.r;
     }
 
     let q0 = quaternion_from_rotation(start.r);

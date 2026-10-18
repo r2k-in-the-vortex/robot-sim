@@ -1764,8 +1764,10 @@ exactly at the sampled points. `robot-motion/src/linear.rs` contains the Lean vo
 supplies the timing and the app boundary:
 
 1. Sample the path uniformly in the parameter `s ∈ [0, 1]` and solve each pose with the
-   closed-form IK, choosing the candidate nearest the previous sample and placing it
-   beside the arm's own winding.
+   app's tolerance-widened closed-form solver (`solve`, the same one the pose jogs use —
+   not the exact `solutions`, whose unfiltered candidates can jump between wrist splits
+   after an RPY round trip perturbs a singular pose by an ulp). Choose the candidate
+   nearest the previous sample and place it beside the arm's own winding.
 2. Reject a sample with no candidate or one whose forward kinematics misses the pose, a
    shoulder/elbow label change, or a joint step above 30° between samples.
 3. Estimate per-joint `M1/M2/M3` bounds for `q'(s)`, `q''(s)` and `q'''(s)` by finite

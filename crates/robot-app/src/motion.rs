@@ -1841,6 +1841,19 @@ mod tests {
     }
 
     #[test]
+    fn a_default_movel_draft_is_zero_motion() {
+        let parameters = shipped();
+        let zero = [0.0; JOINT_COUNT];
+        let mut runtime = MotionRuntime::default();
+        runtime.switch_mode(EditorMode::Lin, &parameters, zero);
+        assert_eq!(runtime.editor.start_pose, runtime.editor.stop_pose);
+        let duration = runtime
+            .draft_duration(&parameters, &limits(), zero)
+            .expect("the default draft certifies");
+        assert_eq!(duration, 0.0, "a zero-length line has no duration");
+    }
+
+    #[test]
     fn a_queue_with_a_lin_command_round_trips() {
         let parameters = shipped();
         let commands = vec![lin_command(
