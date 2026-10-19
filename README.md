@@ -14,9 +14,10 @@ It doesn't have to be a frontier model when validations and testing are good eno
 
 A desktop application that simulates a 6-axis articulated robot arm. It draws the
 arm as a chain of Denavit–Hartenberg frames in an interactive 3D view, can overlay
-an STL mesh on the base and on each joint, and moves the arm either joint by joint
-or by jogging the end effector in Cartesian space. Cartesian and rotation jogs are
-solved with a closed-form inverse kinematics derived for this arm's structure.
+an STL mesh on the base and on each joint, and moves the arm joint by joint, by
+jogging the end effector in Cartesian space, or through a queue of joint-space
+motion commands. Cartesian and rotation jogs are solved with a closed-form inverse
+kinematics derived for this arm's structure.
 
 The mathematics behind it is written out in [`mathematics.md`](docs/mathematics.md) and
 proved in Lean under [`lean/`](lean) — see [Mathematics](#mathematics) below.
@@ -36,6 +37,21 @@ Python suites that check it.
 ```powershell
 cargo run -p robot-app --release
 ```
+
+### Motion planner demo
+
+```powershell
+cargo run -p robot-motion-demo
+```
+
+A 1-DOF test bench for the planners in `robot-motion`. Edit the velocity,
+acceleration and jerk limits and the boundary states, then read the planned
+position, velocity, acceleration and jerk from four linked time-series graphs.
+The optimal, conservative and general planners can be compared; the general
+mode exposes the full `(q, v, a)` vector at both boundaries and shows the exact
+stop–move–start viability check, including why an infeasible state is rejected.
+A timeline scrubs through the profile, and the phase table lists every
+constant-jerk segment.
 
 ## Using the simulator
 
@@ -57,7 +73,7 @@ before.
 
 ### Parameters tab
 
-Two sub-tabs, **DH Parameters** and **Meshes**.
+Three sub-tabs, **DH Parameters**, **Meshes** and **Motion limits**.
 
 **DH Parameters.** DH values are editable per joint. Angles are entered in
 degrees, while `d`, `a`, and mesh offsets use consistent model units. The DH
@@ -82,7 +98,14 @@ in that order, in degrees. Opacity ranges from 0 (transparent) to 1 (opaque).
 Use **Show triangle edges** to toggle mesh outlines; it is off by default. Apply
 changes to update the view.
 
-**Save JSON** and **Load JSON** persist all DH and mesh settings in
+**Motion limits.** The physical velocity, acceleration and jerk ceiling of each
+joint, in degrees and seconds, one row per joint. These are the robot's own
+limits: a motion command carries its own V/A/J request, and the effective limit
+is the tighter of the two. A command below the physical limits runs exactly as
+written; one that asks for more is capped, and the Motion tab names the capped
+components.
+
+**Save JSON** and **Load JSON** persist all DH, mesh and motion-limit settings in
 `robot_parameters.json`; mesh paths are stored relative to the configuration
 file when possible. The included DH values are illustrative starter dimensions
 that match the shipped `robot_parameters.json`, not measurements for a specific
@@ -123,6 +146,88 @@ Python. A pose jog keeps that winding: the solved configuration is placed
 beside the angles the arm is holding, so a jog from a wound joint implies at
 most a half turn of motion rather than a whole turn back to its wrapped angle.
 
+### Jog modes
+
+The **Step** / **Continuous** radio pair above the button groups selects how the
+jog buttons behave. **Step** is the behavior described above, and the default:
+one click is one step.
+
+**Continuous** turns every jog button — base frame, tool frame, and the six
+joint ± buttons — into a hold, and the step boxes become rates: one second of
+holding is one step, so a 2.5 s hold moves 2.5 steps. The target is measured
+from the pose the arm held when the press started rather than accumulated frame
+by frame, so a dropped or late frame cannot bend the path, and the release
+timestamp decides exactly where the arm is left. The 3D view follows while the
+button is down and the status line counts the move up as it goes.
+
+A hold ends when the button is released or when the window loses focus, and it
+does not outlive the 3D View tab. A hold that walks past the workspace stops at
+the last pose the solver could answer for, says so in the status line, and
+stays live until released. A DH field edited mid-hold steers the next jog, not
+the one in flight. `simulator.py` has no hold mode; this one is the Rust port's
+addition.
+
+### Motion tab
+
+The Motion tab builds and runs two command types. The **MoveJ / MoveL** pair
+above the editor selects which one the draft is:
+
+- **MoveJ** is a straight line in joint space, one synchronized S-curve for all
+  six joints, so every joint starts and stops together and the slowest one sets
+  the pace.
+- **MoveL** is a straight line for the tool in Cartesian space: the position is
+  affine and the orientation is a spherical interpolation between the endpoint
+  rotations. The app samples the line, solves each sample with the closed-form
+  IK, checks that the shoulder/elbow branch stays continuous and that no joint
+  jumps too far between samples, then times the path with a rest-to-rest
+  S-curve. The Cartesian endpoint is reached exactly at every sample; playback
+  interpolates between samples for display.
+
+The 3D view stays visible in the center; the command editor and queue are on
+the left and the live graphs are along the bottom. MoveJ takes start and stop
+joint angles in degrees (J1–J6); MoveL takes start and stop poses as X/Y/Z in
+model units and roll/pitch/yaw in degrees (ZYX). The two representations are
+kept in step when the mode changes. **From current** fills the start from the
+arm's present pose; **From last queued** fills it from the end of the last
+queued command; the stop's **From current** and **Copy start** do what their
+names say. Adding a command chains the next draft's start to the stop just
+added. The effective-limits table shows the per-joint values after the physical
+limits cap the request, and the amber line names every capped component.
+
+MoveL uses the same per-joint V/A/J request. Its planner is conservative about
+the path: it estimates the joint-space derivative bounds by sampling the line,
+picks the slowest feasible S-curve from the M5 inequalities, and **refuses** a
+line it cannot certify instead of emitting an over-limit trajectory. Starting
+on a wrist singularity (the all-zero pose has joint 5 at zero) can leave no
+continuous joint-space branch in the line's direction; that case is refused
+with a message, and jogging joint 5 away from zero first works. A line whose
+direction keeps the wrist flat can still certify. As with MoveJ, a transition
+MoveJ is inserted from the current pose to the line's start whenever they
+differ.
+
+**Add to queue** appends the draft. The queue lists each command with its
+planned duration; **Remove**, **Clear queue**, **Play all**, **Pause/Resume**,
+**Stop** and **Refresh preview** run it. When the first command starts away from
+the arm's current pose — or when an edit leaves a gap between commands — the
+player inserts a transition MoveJ from the current pose to that start. The
+transition is part of the executed plan and the graphs, not part of the queue
+JSON. Commands are rest-to-rest, so the arm reaches zero velocity at each
+junction; waypoint blending is a future command type.
+
+**Command JSON** and **Queue JSON** are copyable and loadable. A command is one
+`{"type": "movej", ...}` or
+`{"type": "lin", "start": {"position": [x, y, z], "rpy_deg": [r, p, y]}, "stop": {…}, "limits": {…}}`
+object; a queue is
+`{"schema": "robot-app.motion-queue", "version": 1, "commands": [...]}` (a bare
+array is accepted too). Loading validates and plans first, so a malformed queue
+leaves the existing one untouched.
+
+The graphs show joint angles, tool XYZ and unwrapped ZYX orientation over the
+whole planned motion, with a cursor at the playback time. The arm in the 3D
+view, the Parameters-tab joint fields, and the cursor all describe the same
+instant. MoveJ and MoveL are implemented; arcs and waypoint blending are
+planned.
+
 ## Inverse kinematics
 
 Cartesian and rotation jogs solve the full pose with closed-form inverse
@@ -141,6 +246,8 @@ The derivation is in the *Inverse kinematics* section of
 | --- | --- |
 | `crates/robot-kinematics` | DH transforms, forward kinematics, closed-form inverse kinematics |
 | `crates/robot-dynamics` | Wrench frame algebra, gravity and inertia compensation |
+| `crates/robot-motion` | Jerk-limited S-curve planning, synchronization, Cartesian line sampling, tracking and supervision |
+| `crates/robot-motion-demo` | Interactive 1-DOF planner test bench: limits and boundary states in, planned q/v/a/j graphs out |
 | `crates/robot-model` | Parameter types and `robot_parameters.json` persistence |
 | `crates/robot-app` | Bevy + egui desktop application |
 | `crates/robot-golden` | Exact rational arithmetic and the Lean numeral format, for tests |

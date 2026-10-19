@@ -1,6 +1,6 @@
 name = "robot_arm"
 version = "0.1.0"
-defaultTargets = ["TorqueWrench", "Kinematics", "Dynamics", "Atan2", "Zyz", "InverseKinematics"]
+defaultTargets = ["TorqueWrench", "Kinematics", "Dynamics", "Atan2", "Zyz", "InverseKinematics", "Motion"]
 
 [[require]]
 name = "mathlib"
@@ -44,6 +44,19 @@ name = "Zyz"
 # whose convention is exactly `math.atan2`'s.
 [[lean_lib]]
 name = "Atan2"
+
+# Jerk-limited motion: cubic profiles, feasibility, the rational planner, the general
+# stop-move-start planner, stretching, synchronization and the composition bound. A pure
+# proof library; the generator is a separate `lean_exe` outside `defaultTargets`.
+[[lean_lib]]
+name = "Motion"
+
+# Evaluates the rational conservative/optimal/sync cases and writes
+# ../test_data/motion_profiles.json. Not in `defaultTargets`: it is data, not a proof, and
+# `lake exe` compiles it on demand.
+[[lean_exe]]
+name = "motion_test_data"
+root = "MotionTestData"
 
 # Evaluates the transforms on the exact-rational cases and writes
 # ../test_data/force_torque_frames.json. Not in `defaultTargets`: `lake build` stays a

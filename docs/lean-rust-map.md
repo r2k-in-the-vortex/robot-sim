@@ -207,8 +207,120 @@ theorems above are proved from rather than separate laws of the model; the last 
 | --- | --- | --- |
 | `lean/KinematicsTestData.lean` | `test_data/kinematics_frames.json` | `crates/robot-kinematics/tests/lean_ground_truth.rs` |
 | `lean/ForceTorqueTestData.lean` | `test_data/force_torque_frames.json` | `crates/robot-dynamics/tests/force_torque_ground_truth.rs` |
+| `lean/MotionTestData.lean` | `test_data/motion_profiles.json` | `crates/robot-motion/tests/golden_motion.rs` |
 
-Both are outside `defaultTargets`, so `lake build` stays a pure proof build. Both
+All are outside `defaultTargets`, so `lake build` stays a pure proof build. All
 self-check every case by evaluation and **refuse to write on failure** — a guard that was
-demonstrated live rather than assumed. `cargo xtask check-golden` regenerates both and
+demonstrated live rather than assumed. `cargo xtask check-golden` regenerates them and
 asserts the committed data has not drifted.
+
+## Motion
+
+`lean/Motion/` is the specification; `crates/robot-motion` implements it. The
+polynomial layer (`State`, `Segment`, `Profile`, evaluation, stretch, synchronize) is
+`Field`-generic on the Rust side, so `Profile<Ratio>` runs the same code as production and
+the exact goldens compare with `==`.
+
+| Lean | Rust | Test |
+| --- | --- | --- |
+| `Motion.evalFrom` / `Profile.stateAt` | `Profile::eval` | exact-rational samples in `golden_motion.rs` |
+| `Motion.Feasible` / `SafeFrom` | `Profile::from_parts` validation + planner checks | property and golden tests |
+| `Motion.comp_bounds` | — | `composition_bounds` (the chain rule and triangle inequality are tested through the Cartesian certificate; see the M5 map below) |
+| `Motion.comp_bounds_on_feasible` | — | no direct counterpart: the supervisor applies the bound per constant-rate interval |
+| `Motion.planRestConservative` | `plan_rest_conservative` | `golden_motion.rs` conservative cases (exact `Ratio`) |
+| — (M1-opt Lean proofs staged; Rust only) | `plan_rest_to_rest` | `golden_motion.rs` optimal cases (tolerance) |
+| `Motion.stopFeasible` / `Motion.viable` | `stop_feasible` / `viable` | reject cases and `tests/general.rs` |
+| `Motion.stopProfile` / `Motion.startProfile` | `stop_profile` / `start_profile` | `golden_motion.rs` general cases (tolerance) |
+| `Motion.planGeneral` | `plan_general` | `golden_motion.rs` general cases |
+| `Motion.synchronize` | `synchronize` | `golden_motion.rs` sync cases (exact `Ratio`) |
+| `Motion.movejScalar` | `plan_movej_scalar` | `tests/sync.rs` |
+| — (the same composition with the M1-opt scalar profile; app-facing) | `plan_movej_scalar_optimal` | `tests/sync.rs` |
+| `Motion.IsRotation`, `Motion.LinearPath`, `Motion.LinCommand`, `Motion.SampledTrajectory`, `Motion.SampledSolutions`, `Motion.LinPlan`, `Motion.HasLinPlan` | `robot_motion::linear::{LinearPath, LinearSample, SampledTrajectory, solve_sample, certify_linear_path, sample_linear_certificate}`; the app's `lin` command in `robot-app/src/motion_linear.rs` | `linear.rs` unit tests; the app's `lin` command tests |
+| `Motion.stall_error_grows` / `stall_error_crosses` | supervisor plant test | `tests/supervisor.rs` (the Rust side is a simulation; only the kinematic growth is a theorem) |
+
+### Theorem map
+
+**Structural layer (`Motion.Basic`, `Motion.Glue`, `Motion.Smooth`, `Motion.Transforms`)**
+
+| Lean theorem | Meaning | Rust counterpart |
+| --- | --- | --- |
+| `evalFrom_zero`, `evalFrom_totalTime`, `Profile.stateAt_totalTime` | evaluation at the endpoints is the start/fold | `Profile::eval`, `Profile::end` |
+| `endState_q`, `Segment.stateAt_*`, `Segment.exit_*` | closed forms for the cubic and the fold | `Segment::advance`, `Profile::phase_start` |
+| `segmentSafe_bounds`, `bounds_of_safeFrom`, `jerk_bound_of_safeFrom`, `feasible_of_safeFrom` | endpoint certificates imply `Feasible` | planner validation and the golden maxima checks |
+| `contDiff_piecewise_le`, `contDiff_piecewise_lt` | piecewise `C^n` gluing | — (proof layer) |
+| `hasDerivAt_stateAt_q/v`, `deriv_evalFrom_q/v`, `iteratedDeriv_two_stateAt_q` | the cubic's derivatives are the state fields | `eval`'s derivative convention |
+| `evalFrom_contDiff_q(_of_ne)` | a nonempty profile's position is globally `C²` | — (proof layer) |
+| `evalFrom_template_v_nonneg` | the conservative template's velocity is nonnegative | monotonicity expectations in the golden tests |
+| `Profile.totalTime_append`, `stateAt_append`, `feasible_append` | concatenation evaluation and feasibility | `Profile::append` |
+| `Profile.stateAt_translate/mirror/stretch/reverse` | the four transforms' evaluation laws | `Profile::translate/mirror/stretch/reverse` |
+| `Profile.totalTime_*`, `Profile.feasible_*` | the transforms preserve duration/feasibility under their stated hypotheses | the same Rust methods |
+| `Profile.stretch_isRest`, `Profile.stretch_endState` | stretching preserves rest boundaries | `stretch` tests |
+
+**M1-default (`Motion.Plan.Conservative`)** — all eight ladder theorems are proved, with no
+`sorry`: `planRestConservative_boundary`, `_isRest`, `_feasible`, `_smooth`, `_monotone`,
+`_totalTime_nonneg`, `_length_le`, `_shape`.
+
+**M2 (`Motion.General`)**
+
+| Lean theorem | Status |
+| --- | --- |
+| `stopProfile_feasible` | proved |
+| `stopProfile_ends_at_rest` | proved |
+| `startProfile_feasible`, `startProfile_starts_at_rest`, `startProfile_endState` | proved |
+| `planGeneral_boundary`, `planGeneral_feasible`, `planGeneral_length_le` | proved |
+| `planGeneral_isSome_iff` | proved (`isSome ↔ Viable`) |
+| `stopFeasible_necessary` | **not formalised** — the necessity half needs a velocity-integral argument over arbitrary profiles; the constructive half and the exact `isSome_iff` above are the proved contract. This is the documented M2 gap, not a silent weakening. |
+
+**M3 (`Motion.Sync`, `Motion.MoveJ`)**
+
+| Lean theorem | Status |
+| --- | --- |
+| `hold_totalTime`, `hold_stateAt`, `hold_feasible`, `hold_isRest` | proved |
+| `stretchTo_totalTime`, `stretchTo_feasible`, `stretchTo_isRest`, `stretchTo_endpoints` | proved |
+| `syncTime_nonneg`, `totalTime_le_syncTime` | proved |
+| `synchronize_feasible`, `synchronize_isRest`, `synchronize_totalTime`, `synchronize_endpoints`, `synchronize_rest_to_rest`, `synchronize_zero_motion`, `synchronize_all_zero` | proved |
+| `synchronizedStop_totalTime`, `synchronizedStop_rest_at_Tmax`, `synchronizedStop_feasible`, `synchronizedStop_start` | proved |
+| `movejScalar_boundary`, `movejScalar_boundary_of_moving`, `movejScalar_joint_boundary_of_moving`, `movejScalar_stationary`, `movejScalar_path`, `movejScalar_feasible` | proved |
+
+`plan_movej_scalar_optimal` has no separate Lean definition. It is the same composition —
+effective limits, one scalar profile, per-joint jerk scaled by `Δq_i` — with
+`planRestToRest` in place of `planRestConservative`. The path, boundary and feasibility
+theorems are about the composition; the optimal scalar profile itself carries the M1-opt
+staging note below. The app uses the optimal entry point because the conservative
+template's duration floor is about four seconds for any non-zero move.
+
+**M4 and M5**
+
+`Motion.Supervisor` proves `stall_error_grows` and its finite-time crossing corollary
+`stall_error_crosses`; the supervisor's full decision logic (including command saturation)
+is a headless simulation tested in `tests/supervisor.rs`, not a theorem. The M5 Cartesian
+certifier remains a conditional construction: `Motion.comp_bounds` is proved, but the
+sampled path-derivative bounds and `cartesian_path_feasible` are not implemented in Lean.
+`Motion.Linear` is the §5.6 `lin` vocabulary, not the M5 certifier. It defines
+`IsRotation`, `LinearPath`, `LinCommand`, `SampledTrajectory`, `SampledSolutions`,
+`SamplesAreSolutions`, `SamplesOnPath`, `BranchContinuous`, `WithinSampledLimits`,
+`LinPlan` and the existential definition `HasLinPlan`. The module has no theorem: it
+states what a sampled plan must satisfy, not that one exists.
+
+The Rust counterpart is `robot_motion::linear`. `LinearPath` supplies slerp as the
+`rotation` function (the Lean structure's supplied-data slot), `LinearSample` carries the
+placed total angles and shoulder/elbow labels, `SampledTrajectory` is the uniform sampled
+view with the same `k/(count-1)` parameter law and forward finite differences, and
+`check_branch_continuous` / `check_within_sampled_limits` are the two sampled predicates.
+`solve_sample` is the numerical `SamplesAreSolutions`/`SamplesOnPath` step, but it uses the
+application's tolerance-widened [`robot_kinematics::solve`] (`Tolerances::python()`) rather
+than the exact `solutions`: the app's RPY command boundary can perturb a singular pose by
+an ulp, and the unfiltered exact candidates then jump between wrist splits. Every returned
+candidate is still required to reproduce the sampled pose within `POSE_TOLERANCE`, so the
+predicate is enforced numerically rather than as exact membership in `solutions`.
+The module additionally offers `certify_linear_path` + `sample_linear_certificate`, the
+application's rest-to-rest time law. Those two are a **numerical** extension: the M1/M2/M3
+path-derivative bounds are finite differences over a sample grid, not the hypotheses of
+`cartesian_path_feasible`, so the result is a sampled certificate rather than a proof.
+The app's `lin` command is the user-facing instantiation of that extension; the Lean module
+itself still proves nothing about it.
+
+**M1-opt (staged).** The Rust `plan_rest_to_rest` (Cases A/A′/B/C, with `sqrt`/`cbrt`)
+is implemented and golden-tested with the declared tolerance. The Lean proofs of the
+radical cases are not part of this landing; `planRestConservative` is the verified default,
+and the M1-opt gap is named in `docs/motion_control.md` §4.7.

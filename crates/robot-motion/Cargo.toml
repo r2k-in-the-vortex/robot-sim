@@ -1,0 +1,30 @@
+[package]
+name = "robot-motion"
+description = "Jerk-limited trajectory planning and tracking, written against the Lean specification in lean/Motion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+# Use the platform's maths library. Off, the crate is `no_std` and the `libm`
+# feature becomes the source of `sqrt`/`cbrt`.
+std = ["robot-kinematics/std"]
+# Pure-Rust roots, reproducible across targets.
+libm = ["dep:libm", "robot-kinematics/libm"]
+
+[dependencies]
+# `Field` is the polynomial layer: `Profile`, evaluation, stretch and sync are
+# generic over it, so `robot_golden::Ratio` runs the same code exactly.
+robot-kinematics.workspace = true
+libm = { version = "0.2", optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dev-dependencies]
+proptest = "1.11.0"
+robot-golden.workspace = true
+serde_json = "1"

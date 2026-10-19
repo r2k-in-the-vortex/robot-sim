@@ -18,7 +18,7 @@ const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 /// way the generators themselves document it. `lake exe` compiles a generator on demand;
 /// none of them is in the lakefile's `defaultTargets`, so `lake build` stays a proof-only
 /// build.
-const GENERATORS: [(&str, &str); 3] = [
+const GENERATORS: [(&str, &str); 4] = [
     (
         "kinematics_test_data",
         "../test_data/kinematics_frames.json",
@@ -28,6 +28,7 @@ const GENERATORS: [(&str, &str); 3] = [
         "../test_data/force_torque_frames.json",
     ),
     ("branch_decision_q", "../test_data/branch_plans.json"),
+    ("motion_test_data", "../test_data/motion_profiles.json"),
 ];
 
 fn main() -> ExitCode {

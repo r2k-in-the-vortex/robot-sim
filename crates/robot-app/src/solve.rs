@@ -33,8 +33,53 @@
 //! `session.rs`'s to document; this module's boundary is only that the angles come back as
 //! totals.
 
-use robot_kinematics::{GeometryError, Pose, SolutionSet, Tolerances};
+use robot_kinematics::{
+    GeometryError, JOINT_COUNT, Pose, Solution, SolutionSet, Tolerances, units,
+};
 use robot_model::{DHParameters, TableError};
+
+/// One solved configuration, already placed beside the arm's own angles.
+///
+/// [`solve`] returns every candidate in the solver's wrapped representatives. A caller
+/// that is *moving* the arm — a jog, a transition, a linear path's start — needs the one
+/// candidate nearest the configuration the arm holds and then needs it expressed in the
+/// arm's continuous runtime degrees, not wrapped into one turn. This is that pair of
+/// steps, the same [`SolutionSet::nearest_to`] then [`Solution::representative_near`]
+/// sequence `Session::jog_pose_to` performs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlacedSolution {
+    pub angles_deg: [f64; JOINT_COUNT],
+    pub shoulder: i8,
+    pub elbow: i8,
+}
+
+/// The candidate nearest `reference_deg`, placed beside it, or `None` if the pose is
+/// unreachable.
+pub fn solve_nearest_deg(
+    parameters: &DHParameters,
+    target: &Pose<f64>,
+    reference_deg: &[f64; JOINT_COUNT],
+) -> Result<Option<PlacedSolution>, TableError> {
+    let solutions = solve(parameters, target)?;
+    let reference = Solution {
+        angles: parameters.total_angles_rad(reference_deg),
+        shoulder: 1,
+        elbow: 1,
+    };
+    Ok(solutions.nearest_to(&reference).map(|chosen| {
+        let placed = chosen.representative_near(&reference);
+        PlacedSolution {
+            angles_deg: core::array::from_fn(|joint| {
+                units::rad_to_deg(
+                    placed.angles[joint]
+                        - units::deg_to_rad(parameters.joints[joint].theta_offset_deg),
+                )
+            }),
+            shoulder: chosen.shoulder,
+            elbow: chosen.elbow,
+        }
+    }))
+}
 
 /// Every configuration that reproduces `target`, or nothing if none does.
 ///
